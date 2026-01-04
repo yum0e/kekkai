@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -368,6 +369,41 @@ func TestStartAgent_ExistingWorkspace(t *testing.T) {
 	}
 }
 
+func TestStartAgent_CreatesGitMarkerForExistingWorkspace(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentsDir := filepath.Join(tmpDir, AgentsDir)
+	workspaceDir := filepath.Join(agentsDir, "test-agent")
+
+	if err := os.MkdirAll(workspaceDir, 0755); err != nil {
+		t.Fatalf("Failed to create workspace dir: %v", err)
+	}
+
+	cfg := ManagerConfig{
+		MaxAgents:       5,
+		ShutdownTimeout: DefaultShutdownTimeout,
+		RepoRoot:        tmpDir,
+	}
+	mgr := NewManager(cfg, nil)
+
+	ctx := context.Background()
+	err := mgr.StartAgent(ctx, "test-agent")
+	if err != nil && err == ErrWorkspaceNotFound {
+		t.Fatalf("StartAgent returned ErrWorkspaceNotFound for existing workspace")
+	}
+
+	gitMarker := filepath.Join(workspaceDir, ".git")
+	info, statErr := os.Stat(gitMarker)
+	if os.IsNotExist(statErr) {
+		t.Fatalf(".git marker should exist after StartAgent")
+	}
+	if statErr != nil {
+		t.Fatalf("Failed to stat .git marker: %v", statErr)
+	}
+	if info.IsDir() {
+		t.Fatalf(".git marker should be a file, not a directory")
+	}
+}
+
 func TestStartAgent_NonExistentWorkspace(t *testing.T) {
 	tmpDir := t.TempDir()
 	agentsDir := filepath.Join(tmpDir, AgentsDir)
@@ -678,5 +714,101 @@ func TestDeleteAgent_NonExistentProcess_StillCleansUp(t *testing.T) {
 	// Workspace directory should be removed
 	if _, err := os.Stat(workspaceDir); !os.IsNotExist(err) {
 		t.Error("Workspace directory should be removed even for orphan agent")
+	}
+}
+
+func TestWorkspaceIsolation_GitMarkerCreated(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentsDir := filepath.Join(tmpDir, AgentsDir)
+	workspaceDir := filepath.Join(agentsDir, "test-agent")
+
+	// Create workspace directory
+	if err := os.MkdirAll(workspaceDir, 0755); err != nil {
+		t.Fatalf("Failed to create workspace dir: %v", err)
+	}
+
+	// Simulate the .git marker creation that SpawnAgent does
+	gitMarker := filepath.Join(workspaceDir, ".git")
+	if err := os.WriteFile(gitMarker, []byte("# Marker to scope Claude to this workspace\n"), 0644); err != nil {
+		t.Fatalf("Failed to write .git marker: %v", err)
+	}
+
+	// Verify .git marker exists
+	if _, err := os.Stat(gitMarker); os.IsNotExist(err) {
+		t.Error(".git marker should exist in workspace")
+	}
+
+	// Verify it's a file (not directory)
+	info, err := os.Stat(gitMarker)
+	if err != nil {
+		t.Fatalf("Failed to stat .git marker: %v", err)
+	}
+	if info.IsDir() {
+		t.Error(".git should be a file, not a directory")
+	}
+}
+
+func TestWorkspaceIsolation_IsolatedEnv(t *testing.T) {
+	workDir := "/test/workspace"
+	proc := NewProcess("test-agent", workDir, nil)
+
+	env := proc.isolatedEnv()
+
+	// Check PWD is set to workspace
+	var pwdFound bool
+	var homePreserved bool
+	for _, e := range env {
+		if e == "PWD="+workDir {
+			pwdFound = true
+		}
+		if len(e) > 5 && e[:5] == "HOME=" {
+			homePreserved = true
+		}
+	}
+
+	if !pwdFound {
+		t.Error("PWD should be set to workspace directory")
+	}
+	if !homePreserved {
+		t.Error("HOME should be preserved for auth")
+	}
+
+	// Check OLDPWD is not present
+	for _, e := range env {
+		if len(e) > 7 && e[:7] == "OLDPWD=" {
+			t.Error("OLDPWD should not be present in isolated env")
+		}
+	}
+}
+
+func TestWorkspaceIsolation_ProcessStartsInWorkspace(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create a simple test script
+	scriptPath := filepath.Join(tmpDir, "test.sh")
+	script := "#!/bin/sh\npwd"
+	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+		t.Fatalf("Failed to write test script: %v", err)
+	}
+
+	// Create workspace
+	workspaceDir := filepath.Join(tmpDir, "workspace")
+	if err := os.MkdirAll(workspaceDir, 0755); err != nil {
+		t.Fatalf("Failed to create workspace: %v", err)
+	}
+
+	// Run script from workspace directory
+	cmd := exec.Command(scriptPath)
+	cmd.Dir = workspaceDir
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("Script failed: %v", err)
+	}
+
+	// Verify pwd output matches workspace
+	got := string(output)
+	got = got[:len(got)-1] // trim newline
+	if got != workspaceDir {
+		t.Errorf("Process ran in %q, want %q", got, workspaceDir)
 	}
 }

@@ -32,7 +32,7 @@ Manager
 The claude subprocess is started with these flags:
 
 ```bash
-claude -p --verbose --input-format stream-json --output-format stream-json --add-dir <workspace>
+cd <workspace> && claude -p --verbose --input-format stream-json --output-format stream-json --add-dir <workspace>
 ```
 
 | Flag                           | Required | Purpose                                      |
@@ -42,6 +42,8 @@ claude -p --verbose --input-format stream-json --output-format stream-json --add
 | `--input-format stream-json`   | Yes      | Accept streaming JSON input on stdin         |
 | `--output-format stream-json`  | Yes      | Output streaming JSON on stdout              |
 | `--add-dir <workspace>`        | Yes      | Allow editing files in the agent's workspace |
+
+Note: The `cd` is done via `cmd.Dir` in Go, which sets the process working directory.
 
 ### Input Message Format
 
@@ -132,6 +134,11 @@ if err == nil {
 - Stderr from claude is captured and emitted as `EventError` with `[stderr]` prefix
 - Parse errors include the raw line that failed to parse
 - `SendInput` returns proper errors (not silent failures)
+
+### Workspace Isolation
+- Each agent's working directory is set to its workspace via `cmd.Dir`
+- `--add-dir` restricts file editing to the workspace only
+- Agents see full project context (jj provides revision-level isolation)
 
 ### Testing
 - Use `InjectProcessForTest()` to inject mock processes

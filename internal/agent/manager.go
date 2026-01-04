@@ -89,6 +89,35 @@ func (m *Manager) agentWorkspacePath(repoRoot, name string) string {
 	return filepath.Join(repoRoot, AgentsDir, name)
 }
 
+// ensureGitMarker makes the workspace appear as its own repo root.
+func (m *Manager) ensureGitMarker(name, workDir string) {
+	gitMarker := filepath.Join(workDir, ".git")
+	if _, err := os.Stat(gitMarker); err == nil {
+		return
+	} else if !os.IsNotExist(err) {
+		m.events <- Event{
+			AgentName: name,
+			Type:      EventError,
+			Data: ErrorData{
+				Message: "failed to stat .git marker",
+				Err:     err,
+			},
+		}
+		return
+	}
+
+	if err := os.WriteFile(gitMarker, []byte("# Marker to scope Claude to this workspace\n"), 0644); err != nil {
+		m.events <- Event{
+			AgentName: name,
+			Type:      EventError,
+			Data: ErrorData{
+				Message: "failed to write .git marker",
+				Err:     err,
+			},
+		}
+	}
+}
+
 // Events returns a read-only channel for consuming agent events.
 func (m *Manager) Events() <-chan Event {
 	return m.events
@@ -137,6 +166,10 @@ func (m *Manager) SpawnAgent(ctx context.Context, name string) error {
 	if err := m.jjClient.WorkspaceAdd(ctx, workDir, "@"); err != nil {
 		return fmt.Errorf("failed to create workspace: %w", err)
 	}
+
+	// Create .git marker to prevent Claude from detecting parent jj repo
+	// This makes Claude treat the workspace as its own project root
+	m.ensureGitMarker(name, workDir)
 
 	// Create process
 	proc := NewProcess(name, workDir, m.events)
@@ -203,6 +236,9 @@ func (m *Manager) StartAgent(ctx context.Context, name string) error {
 	if _, err := os.Stat(workDir); os.IsNotExist(err) {
 		return ErrWorkspaceNotFound
 	}
+
+	// Ensure the workspace is treated as a standalone project root
+	m.ensureGitMarker(name, workDir)
 
 	// Handle stale workspaces (skip if no jjClient, e.g., in tests)
 	// Stale workspaces occur when the default workspace makes changes that rebase

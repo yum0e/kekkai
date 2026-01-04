@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -38,6 +40,32 @@ func NewProcess(name, workDir string, events chan<- Event) *Process {
 	}
 }
 
+// isolatedEnv creates an environment where the agent only knows about its workspace.
+// This prevents agents from being aware of parent directories or other workspaces.
+func (p *Process) isolatedEnv() []string {
+	var env []string
+
+	// Keep all env vars except PWD (to preserve auth in ~/.claude)
+	for _, e := range os.Environ() {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := parts[0]
+
+		// Skip PWD and OLDPWD - we'll set PWD to workspace
+		if key == "PWD" || key == "OLDPWD" {
+			continue
+		}
+		env = append(env, e)
+	}
+
+	// Set PWD to workspace
+	env = append(env, "PWD="+p.WorkDir)
+
+	return env
+}
+
 // Start spawns the claude process with --output-format stream-json.
 func (p *Process) Start(ctx context.Context) error {
 	p.mu.Lock()
@@ -57,7 +85,10 @@ func (p *Process) Start(ctx context.Context) error {
 		"--output-format", "stream-json",    // Output streaming JSON
 		"--add-dir", p.WorkDir,              // Allow editing files in workspace
 	)
-	p.cmd.Dir = p.WorkDir
+	p.cmd.Dir = p.WorkDir // This is the cd - process starts in workspace
+
+	// Set up isolated environment - agent only knows about its workspace
+	p.cmd.Env = p.isolatedEnv()
 
 	stdin, err := p.cmd.StdinPipe()
 	if err != nil {

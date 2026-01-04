@@ -227,6 +227,13 @@ func (m ChatViewModel) handleNormalMode(msg tea.KeyMsg) (ChatViewModel, tea.Cmd)
 		if m.shouldShowSpinner() {
 			m.waitingForResponse = false
 			m.currentActivity = ""
+			m.spinnerActive = false
+			// Clear all in-progress tool states
+			for id, ts := range m.toolStates {
+				if ts.Status == ToolInProgress {
+					delete(m.toolStates, id)
+				}
+			}
 			return m, func() tea.Msg {
 				return CancelAgentMsg{WorkspaceName: m.workspace}
 			}
@@ -407,9 +414,16 @@ func (m ChatViewModel) handleAgentEvent(evt agent.Event) (ChatViewModel, tea.Cmd
 
 	case agent.EventError:
 		if data, ok := evt.Data.(agent.ErrorData); ok {
-			// Clear waiting state on error
+			// Clear all spinner state on error
 			m.waitingForResponse = false
 			m.currentActivity = ""
+			m.spinnerActive = false
+			// Clear in-progress tools
+			for id, ts := range m.toolStates {
+				if ts.Status == ToolInProgress {
+					delete(m.toolStates, id)
+				}
+			}
 
 			m.messages = append(m.messages, ChatMessage{
 				Role:      RoleError,
