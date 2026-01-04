@@ -17,8 +17,15 @@ func main() {
 	}
 
 	p := tea.NewProgram(app, tea.WithAltScreen())
+
+	// Set program reference for event subscription
+	app.SetProgram(p)
+
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+
+	// Cleanup
+	app.Shutdown()
 }

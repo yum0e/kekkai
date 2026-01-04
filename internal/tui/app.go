@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/bigq/dojo/internal/agent"
 	"github.com/bigq/dojo/internal/jj"
 )
 
@@ -16,19 +18,21 @@ type FocusedPane int
 
 const (
 	FocusWorkspaceList FocusedPane = iota
-	FocusDiffView
+	FocusRightPane
 )
 
 // AppModel is the root model for the TUI application.
 type AppModel struct {
 	workspaceList WorkspaceListModel
-	diffView      DiffViewModel
+	rightPane     RightPaneModel
 	confirm       ConfirmModel
 	jjClient      *jj.Client
+	agentManager  *agent.Manager // Lazy initialized
 	focusedPane   FocusedPane
 	width         int
 	height        int
 	err           error
+	program       *tea.Program // For event subscription
 }
 
 // NewApp creates a new TUI application.
@@ -47,7 +51,7 @@ func NewApp() (*AppModel, error) {
 
 	app := &AppModel{
 		workspaceList: NewWorkspaceListModel(client),
-		diffView:      NewDiffViewModel(client),
+		rightPane:     NewRightPaneModel(client),
 		confirm:       NewConfirmModel(),
 		jjClient:      client,
 		focusedPane:   FocusWorkspaceList,
@@ -55,9 +59,41 @@ func NewApp() (*AppModel, error) {
 
 	// Set initial focus
 	app.workspaceList.SetFocused(true)
-	app.diffView.SetFocused(false)
+	app.rightPane.SetFocused(false)
 
 	return app, nil
+}
+
+// SetProgram sets the tea.Program for event subscription.
+func (m *AppModel) SetProgram(p *tea.Program) {
+	m.program = p
+}
+
+// ensureAgentManager lazily initializes the agent manager.
+func (m *AppModel) ensureAgentManager() *agent.Manager {
+	if m.agentManager == nil {
+		m.agentManager = agent.NewManager(agent.DefaultConfig(), m.jjClient)
+		// Start event listener goroutine
+		go m.listenAgentEvents()
+	}
+	return m.agentManager
+}
+
+// listenAgentEvents reads from the manager's event channel and sends to tea.Program.
+func (m *AppModel) listenAgentEvents() {
+	if m.agentManager == nil || m.program == nil {
+		return
+	}
+	for evt := range m.agentManager.Events() {
+		m.program.Send(AgentEventMsg{Event: evt})
+	}
+}
+
+// Shutdown cleans up resources.
+func (m *AppModel) Shutdown() {
+	if m.agentManager != nil {
+		m.agentManager.Shutdown(context.Background())
+	}
 }
 
 // Init initializes the application.
@@ -89,12 +125,16 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch msg.String() {
 		case "q", "ctrl+c":
+			m.Shutdown()
 			return m, tea.Quit
 		case "tab":
 			m.toggleFocus()
 			return m, nil
 		case "r":
-			return m, func() tea.Msg { return RefreshDiffMsg{} }
+			// Only refresh if in diff view, not chat
+			if m.focusedPane == FocusRightPane && m.rightPane.activeTab == TabDiff {
+				return m, func() tea.Msg { return RefreshDiffMsg{} }
+			}
 		}
 
 	case ConfirmDeleteMsg:
@@ -108,10 +148,88 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ConfirmResultMsg:
 		if msg.Confirmed && msg.Action == "delete" {
 			if name, ok := msg.Data.(string); ok {
+				// Use agent manager to properly stop agent before deleting
+				if m.agentManager != nil {
+					return m, func() tea.Msg {
+						ctx := context.Background()
+						err := m.agentManager.DeleteAgent(ctx, name)
+						return WorkspaceDeletedMsg{Name: name, Err: err}
+					}
+				}
+				// Fallback to direct deletion if no manager
 				return m, m.workspaceList.DeleteWorkspace(name)
 			}
 		}
 		return m, nil
+
+	case SpawnAgentMsg:
+		// Lazy init manager and start agent in existing workspace
+		mgr := m.ensureAgentManager()
+		return m, func() tea.Msg {
+			ctx := context.Background()
+			// Use StartAgent since workspace already exists
+			err := mgr.StartAgent(ctx, msg.WorkspaceName)
+			return SpawnAgentResultMsg{
+				WorkspaceName: msg.WorkspaceName,
+				Success:       err == nil,
+				Error:         err,
+			}
+		}
+
+	case SpawnAgentResultMsg:
+		// Route to right pane
+		var cmd tea.Cmd
+		m.rightPane, cmd = m.rightPane.Update(msg)
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		// Start flash clear timer if there was an error
+		if !msg.Success {
+			cmds = append(cmds, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+				return StatusFlashClearMsg{}
+			}))
+		}
+		return m, tea.Batch(cmds...)
+
+	case ChatInputMsg:
+		// Send input to agent
+		if m.agentManager != nil {
+			proc, err := m.agentManager.GetProcess(msg.Workspace)
+			if err == nil {
+				_ = proc.SendInput(msg.Input)
+			}
+		}
+		return m, nil
+
+	case RestartAgentMsg:
+		if m.agentManager != nil {
+			return m, func() tea.Msg {
+				ctx := context.Background()
+				err := m.agentManager.RestartAgent(ctx, msg.WorkspaceName)
+				if err != nil {
+					return AgentCrashedMsg{WorkspaceName: msg.WorkspaceName, Error: err}
+				}
+				return SpawnAgentResultMsg{WorkspaceName: msg.WorkspaceName, Success: true}
+			}
+		}
+		return m, nil
+
+	case AgentEventMsg:
+		// Route to right pane
+		var cmd tea.Cmd
+		m.rightPane, cmd = m.rightPane.Update(msg)
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		return m, tea.Batch(cmds...)
+
+	case StatusFlashClearMsg:
+		var cmd tea.Cmd
+		m.rightPane, cmd = m.rightPane.Update(msg)
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		return m, tea.Batch(cmds...)
 	}
 
 	// Route to child components
@@ -123,8 +241,8 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 	}
 
-	// Update diff view
-	m.diffView, cmd = m.diffView.Update(msg)
+	// Update right pane
+	m.rightPane, cmd = m.rightPane.Update(msg)
 	if cmd != nil {
 		cmds = append(cmds, cmd)
 	}
@@ -135,13 +253,13 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // toggleFocus switches focus between panes.
 func (m *AppModel) toggleFocus() {
 	if m.focusedPane == FocusWorkspaceList {
-		m.focusedPane = FocusDiffView
+		m.focusedPane = FocusRightPane
 		m.workspaceList.SetFocused(false)
-		m.diffView.SetFocused(true)
+		m.rightPane.SetFocused(true)
 	} else {
 		m.focusedPane = FocusWorkspaceList
 		m.workspaceList.SetFocused(true)
-		m.diffView.SetFocused(false)
+		m.rightPane.SetFocused(false)
 	}
 }
 
@@ -163,7 +281,7 @@ func (m *AppModel) recalculateLayout() {
 	contentHeight := m.height - 4 // title (1) + help (1) + borders (2)
 
 	m.workspaceList.SetSize(leftWidth, contentHeight)
-	m.diffView.SetSize(rightWidth, contentHeight)
+	m.rightPane.SetSize(rightWidth, contentHeight)
 	m.confirm.SetSize(m.width, m.height)
 }
 
@@ -195,17 +313,26 @@ func (m AppModel) View() string {
 		Height(contentHeight)
 	leftPane := leftBorder.Render(m.workspaceList.View())
 
-	// Right pane (diff view)
-	rightBorder := m.diffView.borderStyle().
+	// Right pane (tabbed view)
+	rightBorder := m.rightPane.borderStyle().
 		Width(rightWidth - 2).
 		Height(contentHeight)
-	rightPane := rightBorder.Render(m.diffView.View())
+	rightPane := rightBorder.Render(m.rightPane.View())
 
 	// Join panes horizontally
 	content := lipgloss.JoinHorizontal(lipgloss.Top, leftPane, rightPane)
 
-	// Help bar
-	helpText := "j/k: navigate | Enter: select | a: add | d: delete | r: refresh | Tab: switch pane | q: quit"
+	// Help bar - context-aware
+	var helpText string
+	if m.focusedPane == FocusRightPane && m.rightPane.activeTab == TabChat && !m.rightPane.isDefault {
+		if m.rightPane.chatView.inputMode == ModeInsert {
+			helpText = "Enter: send | Shift+Enter: newline | Esc: normal mode"
+		} else {
+			helpText = "i: insert | j/k: scroll | g/G: top/bottom | Shift+Tab: switch tab"
+		}
+	} else {
+		helpText = "j/k: navigate | Enter: select | a: add | d: delete | r: refresh | Tab: pane | Shift+Tab: tab"
+	}
 	helpBar := HelpStyle.Width(m.width).Render(helpText)
 
 	// Combine all

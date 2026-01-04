@@ -189,3 +189,40 @@ func (m *Manager) GetProcess(name string) (*Process, error)
 3. **Vim Input**: Normal/Insert modes, keybindings
 4. **Agent Integration**: SendInput, queue, auto-spawn, crash handling
 5. **Polish**: auto-scroll, help bar, state preservation
+
+---
+
+## Interview Findings (2026-01-04) - Round 2
+
+### Implementation Decisions
+
+| Topic | Decision |
+|-------|----------|
+| Event bridging | tea.Sub goroutine: App spawns goroutine reading manager.Events(), sends via tea program |
+| Busy detection | Running = busy, Idle = ready. No new state needed |
+| Input queue | Always queue input, deliver when agent becomes Idle |
+| Tab keybinding | Add Shift+Tab as fallback (Ctrl+Tab may fail in terminals) |
+| Input mode | Multiline: Enter submits, Shift+Enter for newlines |
+| Auto-scroll | Smart scroll: only if already at bottom, preserve position if user scrolled up |
+| Workspace switch | View switch only - background agents keep running |
+| Normal mode nav | Viewport scroll only (j/k), no message cursor |
+| Retry behavior | Restart process via manager.RestartAgent() (same workspace) |
+| Manager init | Lazy init: create manager on first agent spawn, shutdown on app quit |
+| Spawn failure | Block tab switch + status line flash error message |
+
+### Updated Keybindings
+
+#### Tab Navigation
+| Key | Action |
+|-----|--------|
+| Ctrl+Tab | Cycle tabs |
+| Shift+Tab | Cycle tabs (fallback) |
+
+#### Chat Insert Mode
+| Key | Action |
+|-----|--------|
+| chars | Type into buffer |
+| Backspace | Delete char |
+| Enter | Submit message |
+| Shift+Enter | Insert newline |
+| Esc | Exit to normal mode |

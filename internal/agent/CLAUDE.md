@@ -39,8 +39,11 @@ PIDSubDir = ".pids"         // PID files at .jj/agents/.pids/
 ```go
 mgr := agent.NewManager(agent.DefaultConfig(), jjClient)
 
-// Spawn agent (creates workspace + starts claude)
+// Spawn agent (creates NEW workspace + starts claude)
 err := mgr.SpawnAgent(ctx, "agent-1")
+
+// Start agent in EXISTING workspace (use when switching to Chat tab)
+err = mgr.StartAgent(ctx, "agent-1") // Returns nil if already running
 
 // Listen for events
 go func() {
@@ -59,6 +62,12 @@ mgr.StopAgent("agent-1")
 
 // Delete agent (removes workspace)
 mgr.DeleteAgent(ctx, "agent-1")
+
+// Get process to send input (M5 chat integration)
+proc, err := mgr.GetProcess("agent-1")
+if err == nil {
+    proc.SendInput("user message")
+}
 ```
 
 ## Event Types

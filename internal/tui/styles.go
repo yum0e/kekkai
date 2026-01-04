@@ -89,3 +89,47 @@ var (
 				Foreground(colorWhite).
 				Bold(true)
 )
+
+// Tab bar styles
+var (
+	TabBarStyle = lipgloss.NewStyle().
+			Background(lipgloss.Color("#1A1A1A"))
+
+	TabActiveStyle = lipgloss.NewStyle().
+			Foreground(colorWhite).
+			Background(colorPrimary).
+			Bold(true).
+			Padding(0, 1)
+
+	TabInactiveStyle = lipgloss.NewStyle().
+				Foreground(colorGray).
+				Background(lipgloss.Color("#2A2A2A")).
+				Padding(0, 1)
+)
+
+// Chat message styles
+var (
+	ChatUserStyle = lipgloss.NewStyle().
+			Foreground(colorPrimary).
+			Bold(true)
+
+	ChatAgentStyle = lipgloss.NewStyle().
+			Foreground(colorGreen).
+			Bold(true)
+
+	ChatToolStyle = lipgloss.NewStyle().
+			Foreground(colorGray)
+
+	ChatToolSuccessStyle = lipgloss.NewStyle().
+				Foreground(colorGreen)
+
+	ChatToolErrorStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#FF0000"))
+
+	ChatModeNormalStyle = lipgloss.NewStyle().
+				Foreground(colorGray)
+
+	ChatModeInsertStyle = lipgloss.NewStyle().
+				Foreground(colorGold).
+				Bold(true)
+)

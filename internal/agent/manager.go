@@ -163,6 +163,68 @@ func (m *Manager) SpawnAgent(ctx context.Context, name string) error {
 	return nil
 }
 
+// StartAgent starts a claude process in an existing workspace.
+// Use this when the workspace already exists (e.g., switching to Chat tab).
+// Returns nil if agent is already running.
+func (m *Manager) StartAgent(ctx context.Context, name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// If agent already running, nothing to do
+	if proc, exists := m.processes[name]; exists {
+		if proc.GetState() == StateRunning || proc.GetState() == StateIdle {
+			return nil
+		}
+	}
+
+	// Check agent limit
+	if len(m.processes) >= m.config.MaxAgents {
+		return ErrMaxAgentsReached
+	}
+
+	// Get repo root for workspace path
+	repoRoot := m.config.RepoRoot
+	if repoRoot == "" {
+		var err error
+		repoRoot, err = m.jjClient.WorkspaceRoot(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to get workspace root: %w", err)
+		}
+	}
+
+	// Workspace should already exist at .jj/agents/<name>
+	workDir := m.agentWorkspacePath(repoRoot, name)
+
+	// Verify workspace directory exists
+	if _, err := os.Stat(workDir); os.IsNotExist(err) {
+		return ErrWorkspaceNotFound
+	}
+
+	// Create process
+	proc := NewProcess(name, workDir, m.events)
+
+	// Start the process
+	if err := proc.Start(ctx); err != nil {
+		return fmt.Errorf("failed to start agent process: %w", err)
+	}
+
+	// Write PID file
+	if err := WritePIDFile(m.pidPath(repoRoot), name, proc.GetPID()); err != nil {
+		// Non-fatal, just log
+		m.events <- Event{
+			AgentName: name,
+			Type:      EventError,
+			Data: ErrorData{
+				Message: "failed to write PID file",
+				Err:     err,
+			},
+		}
+	}
+
+	m.processes[name] = proc
+	return nil
+}
+
 // StopAgent gracefully stops an agent (keeps workspace).
 func (m *Manager) StopAgent(name string) error {
 	m.mu.Lock()
@@ -268,9 +330,11 @@ func (m *Manager) DeleteAgent(ctx context.Context, name string) error {
 	// Remove PID file
 	_ = RemovePIDFile(m.pidPath(repoRoot), name)
 
-	// Forget the jj workspace
-	if err := m.jjClient.WorkspaceForget(ctx, name); err != nil {
-		// Non-fatal - workspace might not exist
+	// Forget the jj workspace (skip if no jjClient, e.g., in tests)
+	if m.jjClient != nil {
+		if err := m.jjClient.WorkspaceForget(ctx, name); err != nil {
+			// Non-fatal - workspace might not exist
+		}
 	}
 
 	// Remove the workspace directory
@@ -292,6 +356,18 @@ func (m *Manager) GetState(name string) State {
 		return StateStopped
 	}
 	return proc.GetState()
+}
+
+// GetProcess returns the process for an agent.
+func (m *Manager) GetProcess(name string) (*Process, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	proc, exists := m.processes[name]
+	if !exists {
+		return nil, ErrAgentNotFound
+	}
+	return proc, nil
 }
 
 // ListAgents returns all agent names and states.

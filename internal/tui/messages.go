@@ -66,3 +66,40 @@ type AgentStoppedMsg struct {
 	Name string
 	Err  error
 }
+
+// TabSwitchMsg requests a tab switch.
+type TabSwitchMsg struct {
+	Tab Tab
+}
+
+// ChatInputMsg sends user input to an agent.
+type ChatInputMsg struct {
+	Workspace string
+	Input     string
+}
+
+// SpawnAgentMsg requests spawning an agent for a workspace.
+type SpawnAgentMsg struct {
+	WorkspaceName string
+}
+
+// SpawnAgentResultMsg is the result of a spawn attempt.
+type SpawnAgentResultMsg struct {
+	WorkspaceName string
+	Success       bool
+	Error         error
+}
+
+// RestartAgentMsg requests restarting a crashed agent.
+type RestartAgentMsg struct {
+	WorkspaceName string
+}
+
+// AgentCrashedMsg indicates an agent has crashed.
+type AgentCrashedMsg struct {
+	WorkspaceName string
+	Error         error
+}
+
+// StatusFlashClearMsg clears the status flash message.
+type StatusFlashClearMsg struct{}

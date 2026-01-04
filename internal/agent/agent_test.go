@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -328,5 +329,354 @@ func TestDefaultConfig(t *testing.T) {
 func TestAgentsDir(t *testing.T) {
 	if AgentsDir != ".jj/agents" {
 		t.Errorf("AgentsDir = %v, want .jj/agents", AgentsDir)
+	}
+}
+
+func TestStartAgent_ExistingWorkspace(t *testing.T) {
+	// Create temp directory structure
+	tmpDir := t.TempDir()
+	agentsDir := filepath.Join(tmpDir, AgentsDir)
+	workspaceDir := filepath.Join(agentsDir, "test-agent")
+
+	// Create the workspace directory (simulating existing workspace)
+	if err := os.MkdirAll(workspaceDir, 0755); err != nil {
+		t.Fatalf("Failed to create workspace dir: %v", err)
+	}
+
+	// Create manager with RepoRoot set to avoid jjClient calls
+	cfg := ManagerConfig{
+		MaxAgents:       5,
+		ShutdownTimeout: DefaultShutdownTimeout,
+		RepoRoot:        tmpDir,
+	}
+	mgr := NewManager(cfg, nil)
+
+	// StartAgent should fail because claude binary doesn't exist in test
+	// but we can verify it attempts to start (gets past workspace check)
+	ctx := context.Background()
+	err := mgr.StartAgent(ctx, "test-agent")
+
+	// We expect an error about starting the process (not about workspace)
+	if err == nil {
+		// If it succeeded (unlikely in test env), that's fine too
+		t.Log("StartAgent succeeded (claude available in test env)")
+	} else if err == ErrWorkspaceNotFound {
+		t.Error("StartAgent returned ErrWorkspaceNotFound for existing workspace")
+	} else {
+		// Expected: error starting process (claude not found)
+		t.Logf("StartAgent failed as expected (process start): %v", err)
+	}
+}
+
+func TestStartAgent_NonExistentWorkspace(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentsDir := filepath.Join(tmpDir, AgentsDir)
+
+	// Create agents dir but NOT the workspace
+	if err := os.MkdirAll(agentsDir, 0755); err != nil {
+		t.Fatalf("Failed to create agents dir: %v", err)
+	}
+
+	cfg := ManagerConfig{
+		MaxAgents:       5,
+		ShutdownTimeout: DefaultShutdownTimeout,
+		RepoRoot:        tmpDir,
+	}
+	mgr := NewManager(cfg, nil)
+
+	ctx := context.Background()
+	err := mgr.StartAgent(ctx, "nonexistent-agent")
+
+	if err != ErrWorkspaceNotFound {
+		t.Errorf("StartAgent() error = %v, want ErrWorkspaceNotFound", err)
+	}
+}
+
+func TestStartAgent_AlreadyRunning(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentsDir := filepath.Join(tmpDir, AgentsDir)
+	workspaceDir := filepath.Join(agentsDir, "test-agent")
+
+	if err := os.MkdirAll(workspaceDir, 0755); err != nil {
+		t.Fatalf("Failed to create workspace dir: %v", err)
+	}
+
+	cfg := ManagerConfig{
+		MaxAgents:       5,
+		ShutdownTimeout: DefaultShutdownTimeout,
+		RepoRoot:        tmpDir,
+	}
+	mgr := NewManager(cfg, nil)
+
+	// Manually add a running process to simulate already running agent
+	mgr.mu.Lock()
+	mgr.processes["test-agent"] = &Process{
+		Name:    "test-agent",
+		WorkDir: workspaceDir,
+		State:   StateRunning,
+	}
+	mgr.mu.Unlock()
+
+	// StartAgent should return nil (no-op) for already running agent
+	ctx := context.Background()
+	err := mgr.StartAgent(ctx, "test-agent")
+
+	if err != nil {
+		t.Errorf("StartAgent() error = %v, want nil for already running agent", err)
+	}
+}
+
+func TestStartAgent_IdleAgent(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentsDir := filepath.Join(tmpDir, AgentsDir)
+	workspaceDir := filepath.Join(agentsDir, "test-agent")
+
+	if err := os.MkdirAll(workspaceDir, 0755); err != nil {
+		t.Fatalf("Failed to create workspace dir: %v", err)
+	}
+
+	cfg := ManagerConfig{
+		MaxAgents:       5,
+		ShutdownTimeout: DefaultShutdownTimeout,
+		RepoRoot:        tmpDir,
+	}
+	mgr := NewManager(cfg, nil)
+
+	// Add a process in Idle state - should also return nil
+	mgr.mu.Lock()
+	mgr.processes["test-agent"] = &Process{
+		Name:    "test-agent",
+		WorkDir: workspaceDir,
+		State:   StateIdle,
+	}
+	mgr.mu.Unlock()
+
+	ctx := context.Background()
+	err := mgr.StartAgent(ctx, "test-agent")
+
+	if err != nil {
+		t.Errorf("StartAgent() error = %v, want nil for idle agent", err)
+	}
+}
+
+func TestStartAgent_MaxAgentsReached(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentsDir := filepath.Join(tmpDir, AgentsDir)
+	workspaceDir := filepath.Join(agentsDir, "new-agent")
+
+	if err := os.MkdirAll(workspaceDir, 0755); err != nil {
+		t.Fatalf("Failed to create workspace dir: %v", err)
+	}
+
+	cfg := ManagerConfig{
+		MaxAgents:       2, // Low limit for testing
+		ShutdownTimeout: DefaultShutdownTimeout,
+		RepoRoot:        tmpDir,
+	}
+	mgr := NewManager(cfg, nil)
+
+	// Fill up the agent slots
+	mgr.mu.Lock()
+	mgr.processes["agent-1"] = &Process{Name: "agent-1", State: StateRunning}
+	mgr.processes["agent-2"] = &Process{Name: "agent-2", State: StateRunning}
+	mgr.mu.Unlock()
+
+	// Try to start another agent
+	ctx := context.Background()
+	err := mgr.StartAgent(ctx, "new-agent")
+
+	if err != ErrMaxAgentsReached {
+		t.Errorf("StartAgent() error = %v, want ErrMaxAgentsReached", err)
+	}
+}
+
+func TestStartAgent_StoppedAgent_Restarts(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentsDir := filepath.Join(tmpDir, AgentsDir)
+	workspaceDir := filepath.Join(agentsDir, "test-agent")
+
+	if err := os.MkdirAll(workspaceDir, 0755); err != nil {
+		t.Fatalf("Failed to create workspace dir: %v", err)
+	}
+
+	cfg := ManagerConfig{
+		MaxAgents:       5,
+		ShutdownTimeout: DefaultShutdownTimeout,
+		RepoRoot:        tmpDir,
+	}
+	mgr := NewManager(cfg, nil)
+
+	// Add a process in Stopped state - should attempt restart
+	mgr.mu.Lock()
+	mgr.processes["test-agent"] = &Process{
+		Name:    "test-agent",
+		WorkDir: workspaceDir,
+		State:   StateStopped,
+	}
+	mgr.mu.Unlock()
+
+	ctx := context.Background()
+	err := mgr.StartAgent(ctx, "test-agent")
+
+	// Should attempt to restart (will fail due to no claude binary in test)
+	// The key is that it doesn't return nil like for Running/Idle states
+	if err == nil {
+		t.Log("StartAgent succeeded (claude available in test env)")
+	} else if err == ErrWorkspaceNotFound {
+		t.Error("StartAgent returned ErrWorkspaceNotFound for stopped agent with existing workspace")
+	} else {
+		// Expected: error starting process
+		t.Logf("StartAgent attempted restart as expected: %v", err)
+	}
+}
+
+func TestGetProcess_Exists(t *testing.T) {
+	cfg := DefaultConfig()
+	mgr := NewManager(cfg, nil)
+
+	// Add a process
+	proc := &Process{Name: "test-agent", State: StateRunning}
+	mgr.mu.Lock()
+	mgr.processes["test-agent"] = proc
+	mgr.mu.Unlock()
+
+	result, err := mgr.GetProcess("test-agent")
+	if err != nil {
+		t.Errorf("GetProcess() error = %v, want nil", err)
+	}
+	if result != proc {
+		t.Errorf("GetProcess() returned different process")
+	}
+}
+
+func TestGetProcess_NotFound(t *testing.T) {
+	cfg := DefaultConfig()
+	mgr := NewManager(cfg, nil)
+
+	_, err := mgr.GetProcess("nonexistent")
+	if err != ErrAgentNotFound {
+		t.Errorf("GetProcess() error = %v, want ErrAgentNotFound", err)
+	}
+}
+
+func TestDeleteAgent_RemovesFromProcessMap(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentsDir := filepath.Join(tmpDir, AgentsDir)
+	workspaceDir := filepath.Join(agentsDir, "test-agent")
+
+	if err := os.MkdirAll(workspaceDir, 0755); err != nil {
+		t.Fatalf("Failed to create workspace dir: %v", err)
+	}
+
+	cfg := ManagerConfig{
+		MaxAgents:       5,
+		ShutdownTimeout: DefaultShutdownTimeout,
+		RepoRoot:        tmpDir,
+	}
+	mgr := NewManager(cfg, nil)
+
+	// Add a process (simulating a running agent)
+	mgr.mu.Lock()
+	mgr.processes["test-agent"] = &Process{
+		Name:    "test-agent",
+		WorkDir: workspaceDir,
+		State:   StateIdle, // Use Idle to avoid needing real process
+	}
+	mgr.mu.Unlock()
+
+	// Verify process exists
+	_, err := mgr.GetProcess("test-agent")
+	if err != nil {
+		t.Fatalf("Process should exist before delete: %v", err)
+	}
+
+	// Delete the agent
+	ctx := context.Background()
+	err = mgr.DeleteAgent(ctx, "test-agent")
+	if err != nil {
+		t.Fatalf("DeleteAgent() error = %v", err)
+	}
+
+	// Verify process is removed from map
+	_, err = mgr.GetProcess("test-agent")
+	if err != ErrAgentNotFound {
+		t.Errorf("GetProcess() after delete = %v, want ErrAgentNotFound", err)
+	}
+
+	// Verify workspace directory is removed
+	if _, err := os.Stat(workspaceDir); !os.IsNotExist(err) {
+		t.Error("Workspace directory should be removed after DeleteAgent")
+	}
+}
+
+func TestDeleteAgent_StopsRunningProcess(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentsDir := filepath.Join(tmpDir, AgentsDir)
+	workspaceDir := filepath.Join(agentsDir, "test-agent")
+
+	if err := os.MkdirAll(workspaceDir, 0755); err != nil {
+		t.Fatalf("Failed to create workspace dir: %v", err)
+	}
+
+	cfg := ManagerConfig{
+		MaxAgents:       5,
+		ShutdownTimeout: DefaultShutdownTimeout,
+		RepoRoot:        tmpDir,
+	}
+	mgr := NewManager(cfg, nil)
+
+	// Add a process in Running state
+	mgr.mu.Lock()
+	mgr.processes["test-agent"] = &Process{
+		Name:    "test-agent",
+		WorkDir: workspaceDir,
+		State:   StateRunning,
+	}
+	mgr.mu.Unlock()
+
+	// Delete should handle stopping (even if process isn't real)
+	ctx := context.Background()
+	err := mgr.DeleteAgent(ctx, "test-agent")
+
+	// Should succeed (process.Stop handles nil cmd gracefully)
+	if err != nil {
+		t.Logf("DeleteAgent() returned error (expected for mock): %v", err)
+	}
+
+	// Process should be removed from map regardless
+	_, err = mgr.GetProcess("test-agent")
+	if err != ErrAgentNotFound {
+		t.Errorf("Process should be removed after DeleteAgent")
+	}
+}
+
+func TestDeleteAgent_NonExistentProcess_StillCleansUp(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentsDir := filepath.Join(tmpDir, AgentsDir)
+	workspaceDir := filepath.Join(agentsDir, "orphan-agent")
+
+	// Create workspace directory (orphan - no process in manager)
+	if err := os.MkdirAll(workspaceDir, 0755); err != nil {
+		t.Fatalf("Failed to create workspace dir: %v", err)
+	}
+
+	cfg := ManagerConfig{
+		MaxAgents:       5,
+		ShutdownTimeout: DefaultShutdownTimeout,
+		RepoRoot:        tmpDir,
+	}
+	mgr := NewManager(cfg, nil)
+
+	// Delete should still clean up directory even if no process exists
+	ctx := context.Background()
+	err := mgr.DeleteAgent(ctx, "orphan-agent")
+
+	if err != nil {
+		t.Logf("DeleteAgent() returned error: %v", err)
+	}
+
+	// Workspace directory should be removed
+	if _, err := os.Stat(workspaceDir); !os.IsNotExist(err) {
+		t.Error("Workspace directory should be removed even for orphan agent")
 	}
 }

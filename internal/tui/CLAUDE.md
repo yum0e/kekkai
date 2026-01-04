@@ -8,33 +8,65 @@ This package contains all UI components using the Elm architecture (Model-Update
 
 ## Key Files
 
-| File                | Purpose                                              |
-| ------------------- | ---------------------------------------------------- |
-| `app.go`            | Root model, orchestrates layout and child components |
-| `workspace_list.go` | Left pane: lists workspaces with state indicators    |
-| `diff_view.go`      | Right pane: displays jj diff output with scrolling   |
-| `confirm.go`        | Modal Y/N confirmation dialog                        |
-| `styles.go`         | Lipgloss style definitions (colors, borders)         |
-| `messages.go`       | Custom tea.Msg types for component communication     |
+| File                | Purpose                                                 |
+| ------------------- | ------------------------------------------------------- |
+| `app.go`            | Root model, orchestrates layout and child components    |
+| `workspace_list.go` | Left pane: lists workspaces with state indicators       |
+| `right_pane.go`     | Right pane: tabbed container (Chat/Diff)                |
+| `chat_view.go`      | Chat tab: vim-style input, streaming output, tool states|
+| `diff_view.go`      | Diff tab: displays jj diff output with scrolling        |
+| `confirm.go`        | Modal Y/N confirmation dialog                           |
+| `styles.go`         | Lipgloss style definitions (colors, borders, tabs)      |
+| `messages.go`       | Custom tea.Msg types for component communication        |
 
 ## Architecture
 
 ```
 AppModel
 ├── WorkspaceListModel  (left pane, focused by default)
-├── DiffViewModel       (right pane)
-└── ConfirmModel        (overlay dialog)
+├── RightPaneModel      (right pane, tabbed)
+│   ├── ChatViewModel   (Chat tab - agent interaction)
+│   └── DiffViewModel   (Diff tab - jj diff output)
+├── ConfirmModel        (overlay dialog)
+└── agentManager        (lazy init, manages agent processes)
 ```
+
+## Chat View Features
+
+- Vim-style input: Normal mode (j/k scroll, i insert) and Insert mode (Enter submit, Shift+Enter newline)
+- Smart scroll: auto-scrolls only when at bottom
+- Tool states: compact display for success, auto-expand on error
+- Message queue: input queued while agent is busy, delivered when idle
+- Auto-spawn: agents spawned automatically when entering Chat tab
+
+## Tab Navigation
+
+- `Shift+Tab` or `Ctrl+Tab`: cycle between Chat/Diff tabs
+- Default workspace has no Chat tab (user-only workspace)
+- Tab preference remembered per workspace
 
 ## Important Notes
 
 - Agent workspaces are created at `.jj/agents/<name>/` (not repo root)
 - `DeleteWorkspace()` removes both jj workspace and the directory
-- Agent-related messages: `AgentEventMsg`, `AgentSpawnedMsg`, `AgentStoppedMsg`
+- Agent events flow: manager.Events() -> listenAgentEvents goroutine -> tea.Program.Send()
+- `SetProgram()` must be called after creating tea.Program for event subscription
+
+## Key Messages
+
+| Message               | Purpose                                    |
+| --------------------- | ------------------------------------------ |
+| `AgentEventMsg`       | Wraps agent.Event from manager             |
+| `SpawnAgentMsg`       | Request to spawn agent for workspace       |
+| `SpawnAgentResultMsg` | Result of spawn attempt                    |
+| `ChatInputMsg`        | Send user input to agent                   |
+| `RestartAgentMsg`     | Restart crashed agent                      |
+| `StatusFlashClearMsg` | Clear temporary error flash                |
 
 ## When to Look Here
 
 - UI bugs or styling issues
 - Keybinding changes
-- Adding new panes or dialogs
+- Chat/agent interaction issues
+- Tab switching behavior
 - Layout/responsive design issues
