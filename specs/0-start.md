@@ -135,23 +135,23 @@ Without session restore, the tool is unusable for real workflows.
 - [x] Renders "Hello Dojo" with lipgloss styling
 - [x] Project directory structure in place
 
-### M2: jj Client
+### M2: jj Client ✓
 
-- [ ] `internal/jj/errors.go` - Typed errors (ErrWorkspaceExists, ErrWorkspaceNotFound, ErrNotJJRepo)
-- [ ] `internal/jj/client.go` - Execute jj commands, parse output (CWD-based)
-- [ ] `internal/jj/workspace.go` - add (at change ID), delete, list workspaces
-- [ ] `internal/jj/diff.go` - Get diff as raw string
-- [ ] `internal/jj/log.go` - Get and parse log (change ID, message, author, date)
-- [ ] `internal/jj/status.go` - Get working copy status
-- [ ] `internal/jj/ops.go` - commit, squash, rebase, describe, git push
-- [ ] Integration tests with real jj + temp repos
+- [x] `internal/jj/errors.go` - Typed errors (ErrWorkspaceExists, ErrWorkspaceNotFound, ErrNotJJRepo)
+- [x] `internal/jj/client.go` - Execute jj commands, parse output (CWD-based)
+- [x] `internal/jj/workspace.go` - add (at change ID), delete, list workspaces
+- [x] `internal/jj/diff.go` - Get diff as raw string
+- [x] `internal/jj/log.go` - Get and parse log (change ID, message, author, date)
+- [x] `internal/jj/status.go` - Get working copy status
+- [x] `internal/jj/ops.go` - commit, squash, rebase, describe, git push
+- [x] Integration tests with real jj + temp repos
 
-### M3: Workspace List Pane
+### M3: Workspace List Pane ✓
 
-- [ ] Left pane component with workspace list
-- [ ] Keyboard navigation (j/k or arrows)
-- [ ] Visual indicators: ● default, ◐ agent (running), ○ agent (idle)
-- [ ] Selection state management
+- [x] Left pane component with workspace list
+- [x] Keyboard navigation (j/k or arrows)
+- [x] Visual indicators: ● default, ◐ agent (running), ○ agent (idle)
+- [x] Selection state management
 
 ### M4: Agent Spawning
 
