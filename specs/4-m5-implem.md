@@ -200,7 +200,7 @@ func (m *Manager) GetProcess(name string) (*Process, error)
 |-------|----------|
 | Event bridging | tea.Sub goroutine: App spawns goroutine reading manager.Events(), sends via tea program |
 | Busy detection | Running = busy, Idle = ready. No new state needed |
-| Input queue | Always queue input, deliver when agent becomes Idle |
+| Input queue | Send immediately - Claude handles concurrent messages |
 | Tab keybinding | Add Shift+Tab as fallback (Ctrl+Tab may fail in terminals) |
 | Input mode | Multiline: Enter submits, Shift+Enter for newlines |
 | Auto-scroll | Smart scroll: only if already at bottom, preserve position if user scrolled up |

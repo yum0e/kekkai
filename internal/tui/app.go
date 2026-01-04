@@ -192,11 +192,14 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case ChatInputMsg:
-		// Send input to agent
+		// Send input to agent asynchronously to avoid blocking TUI
 		if m.agentManager != nil {
 			proc, err := m.agentManager.GetProcess(msg.Workspace)
 			if err == nil {
-				_ = proc.SendInput(msg.Input)
+				return m, func() tea.Msg {
+					_ = proc.SendInput(msg.Input)
+					return nil // No result message needed
+				}
 			}
 		}
 		return m, nil

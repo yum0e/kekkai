@@ -60,7 +60,6 @@ type ChatViewModel struct {
 	inputMode     InputMode
 	inputBuffer   string
 	inputCursor   int
-	pendingQueue  []string  // Messages queued while agent is busy
 	agentState    agent.State
 	workspace     string
 	toolStates    map[string]*ToolState
@@ -158,13 +157,9 @@ func (m ChatViewModel) handleInsertMode(msg tea.KeyMsg) (ChatViewModel, tea.Cmd)
 			m.atBottom = true
 			m.scrollY = m.maxScroll()
 
-			// Queue or send immediately
-			if m.agentState == agent.StateRunning {
-				m.pendingQueue = append(m.pendingQueue, input)
-			} else {
-				return m, func() tea.Msg {
-					return ChatInputMsg{Workspace: m.workspace, Input: input}
-				}
+			// Always send immediately - Claude handles concurrent messages
+			return m, func() tea.Msg {
+				return ChatInputMsg{Workspace: m.workspace, Input: input}
 			}
 		}
 	case "shift+enter":
@@ -278,15 +273,6 @@ func (m ChatViewModel) handleAgentEvent(evt agent.Event) (ChatViewModel, tea.Cmd
 	case agent.EventStateChange:
 		if data, ok := evt.Data.(agent.StateChangeData); ok {
 			m.agentState = data.NewState
-
-			// Dequeue pending messages when agent becomes idle
-			if data.NewState == agent.StateIdle && len(m.pendingQueue) > 0 {
-				input := m.pendingQueue[0]
-				m.pendingQueue = m.pendingQueue[1:]
-				cmds = append(cmds, func() tea.Msg {
-					return ChatInputMsg{Workspace: m.workspace, Input: input}
-				})
-			}
 		}
 	}
 
@@ -414,11 +400,6 @@ func (m ChatViewModel) renderInputArea() string {
 	}
 
 	statusLine := modeStr + stateStr
-
-	// Queued messages indicator
-	if len(m.pendingQueue) > 0 {
-		statusLine += HelpStyle.Render(" (" + string(rune('0'+len(m.pendingQueue))) + " queued)")
-	}
 
 	// Input line with cursor
 	var inputLine string
