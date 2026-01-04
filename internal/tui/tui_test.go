@@ -1,12 +1,73 @@
 package tui
 
 import (
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/bigq/dojo/internal/agent"
 	"github.com/bigq/dojo/internal/jj"
 )
+
+// requireJJ fails the test if jj is not installed.
+func requireJJ(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("jj"); err != nil {
+		t.Skip("jj is not installed")
+	}
+}
+
+// setupTestRepo creates a temporary jj repository for testing.
+func setupTestRepo(t *testing.T) (repoPath string, cleanup func()) {
+	t.Helper()
+	requireJJ(t)
+
+	tmpDir, err := os.MkdirTemp("", "tui-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+
+	cleanup = func() { os.RemoveAll(tmpDir) }
+
+	// Initialize jj repo
+	cmd := exec.Command("jj", "git", "init")
+	cmd.Dir = tmpDir
+	if err := cmd.Run(); err != nil {
+		cleanup()
+		t.Fatalf("failed to init repository: %v", err)
+	}
+
+	// Configure user via .jj/repo/config.toml
+	configPath := filepath.Join(tmpDir, ".jj", "repo", "config.toml")
+	configContent := `[user]
+name = "Test User"
+email = "test@example.com"
+`
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		cleanup()
+		t.Fatalf("failed to write jj config: %v", err)
+	}
+
+	return tmpDir, cleanup
+}
+
+// runInDir runs a function with the working directory set to dir.
+func runInDir(t *testing.T, dir string, fn func()) {
+	t.Helper()
+	oldDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get current dir: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("failed to change to dir %s: %v", dir, err)
+	}
+	defer os.Chdir(oldDir)
+	fn()
+}
 
 func TestWorkspaceListMinWidth(t *testing.T) {
 	client := jj.NewClient()
@@ -243,4 +304,143 @@ func TestDiffViewEmptyState(t *testing.T) {
 	if view != EmptyDiffStyle.Render("No changes in this workspace") {
 		t.Errorf("expected empty diff message, got %q", view)
 	}
+}
+
+// TestWorkspaceCreatedInAgentsDir tests that workspaces are created in .jj/agents/
+func TestWorkspaceCreatedInAgentsDir(t *testing.T) {
+	repoPath, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	runInDir(t, repoPath, func() {
+		client := jj.NewClient()
+		ctx := context.Background()
+
+		// Ensure agents directory exists (as addWorkspace does)
+		agentsDir := filepath.Join(repoPath, agent.AgentsDir)
+		if err := os.MkdirAll(agentsDir, 0755); err != nil {
+			t.Fatalf("failed to create agents dir: %v", err)
+		}
+
+		// Create workspace at .jj/agents/agent-1
+		workspacePath := filepath.Join(agentsDir, "agent-1")
+		err := client.WorkspaceAdd(ctx, workspacePath, "@")
+		if err != nil {
+			t.Fatalf("WorkspaceAdd failed: %v", err)
+		}
+
+		// Verify workspace was created at correct location
+		expectedPath := filepath.Join(repoPath, ".jj", "agents", "agent-1")
+		if _, err := os.Stat(expectedPath); os.IsNotExist(err) {
+			t.Errorf("workspace not created at expected path: %s", expectedPath)
+		}
+
+		// Verify it's NOT at repo root
+		wrongPath := filepath.Join(repoPath, "agent-1")
+		if _, err := os.Stat(wrongPath); !os.IsNotExist(err) {
+			t.Errorf("workspace should NOT be at repo root: %s", wrongPath)
+		}
+
+		// Verify workspace is in jj workspace list
+		workspaces, err := client.WorkspaceList(ctx)
+		if err != nil {
+			t.Fatalf("WorkspaceList failed: %v", err)
+		}
+
+		found := false
+		for _, ws := range workspaces {
+			if ws.Name == "agent-1" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Error("workspace 'agent-1' not found in workspace list")
+		}
+	})
+}
+
+// TestWorkspaceDeleteRemovesDirectory tests that deleting a workspace removes the directory
+func TestWorkspaceDeleteRemovesDirectory(t *testing.T) {
+	repoPath, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	runInDir(t, repoPath, func() {
+		client := jj.NewClient()
+		ctx := context.Background()
+
+		// Ensure agents directory exists (as addWorkspace does)
+		agentsDir := filepath.Join(repoPath, agent.AgentsDir)
+		if err := os.MkdirAll(agentsDir, 0755); err != nil {
+			t.Fatalf("failed to create agents dir: %v", err)
+		}
+
+		// Create workspace at .jj/agents/agent-1
+		workspacePath := filepath.Join(agentsDir, "agent-1")
+		err := client.WorkspaceAdd(ctx, workspacePath, "@")
+		if err != nil {
+			t.Fatalf("WorkspaceAdd failed: %v", err)
+		}
+
+		// Verify workspace exists
+		if _, err := os.Stat(workspacePath); os.IsNotExist(err) {
+			t.Fatalf("workspace was not created at: %s", workspacePath)
+		}
+
+		// Forget workspace
+		err = client.WorkspaceForget(ctx, "agent-1")
+		if err != nil {
+			t.Fatalf("WorkspaceForget failed: %v", err)
+		}
+
+		// Manually remove directory (as DeleteWorkspace does)
+		err = os.RemoveAll(workspacePath)
+		if err != nil {
+			t.Fatalf("failed to remove workspace directory: %v", err)
+		}
+
+		// Verify directory is gone
+		if _, err := os.Stat(workspacePath); !os.IsNotExist(err) {
+			t.Errorf("workspace directory should be removed: %s", workspacePath)
+		}
+
+		// Verify workspace is no longer in jj workspace list
+		workspaces, err := client.WorkspaceList(ctx)
+		if err != nil {
+			t.Fatalf("WorkspaceList failed: %v", err)
+		}
+
+		for _, ws := range workspaces {
+			if ws.Name == "agent-1" {
+				t.Error("workspace 'agent-1' should not be in workspace list after forget")
+			}
+		}
+	})
+}
+
+// TestComputeWorkDirUsesAgentsDir tests that computeWorkDir returns the correct path
+func TestComputeWorkDirUsesAgentsDir(t *testing.T) {
+	repoPath, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	runInDir(t, repoPath, func() {
+		client := jj.NewClient()
+		m := NewDiffViewModel(client)
+
+		// Default workspace should return empty string
+		workDir := m.computeWorkDir("default")
+		if workDir != "" {
+			t.Errorf("computeWorkDir(default) = %q, want empty string", workDir)
+		}
+
+		// Agent workspace should return .jj/agents/<name>
+		workDir = m.computeWorkDir("agent-1")
+		expectedPath := filepath.Join(repoPath, ".jj", "agents", "agent-1")
+
+		// Resolve symlinks for comparison (macOS /var -> /private/var)
+		workDirResolved, _ := filepath.EvalSymlinks(workDir)
+		expectedResolved, _ := filepath.EvalSymlinks(expectedPath)
+		if workDirResolved != expectedResolved {
+			t.Errorf("computeWorkDir(agent-1) = %q, want %q", workDir, expectedPath)
+		}
+	})
 }

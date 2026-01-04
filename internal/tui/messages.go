@@ -1,6 +1,9 @@
 package tui
 
-import "github.com/bigq/dojo/internal/jj"
+import (
+	"github.com/bigq/dojo/internal/agent"
+	"github.com/bigq/dojo/internal/jj"
+)
 
 // WorkspacesLoadedMsg is sent when the workspace list has been fetched.
 type WorkspacesLoadedMsg struct {
@@ -46,3 +49,20 @@ type ConfirmResultMsg struct {
 
 // RefreshDiffMsg triggers a diff refresh.
 type RefreshDiffMsg struct{}
+
+// AgentEventMsg wraps an agent.Event for the TUI.
+type AgentEventMsg struct {
+	Event agent.Event
+}
+
+// AgentSpawnedMsg is sent when an agent has been spawned.
+type AgentSpawnedMsg struct {
+	Name string
+	Err  error
+}
+
+// AgentStoppedMsg is sent when an agent has been stopped.
+type AgentStoppedMsg struct {
+	Name string
+	Err  error
+}

@@ -4,6 +4,12 @@ import (
 	"context"
 )
 
+// New creates a new empty revision on top of the current working copy.
+func (c *Client) New(ctx context.Context) error {
+	_, err := c.run(ctx, "new")
+	return err
+}
+
 // Commit creates a new commit with the given message.
 func (c *Client) Commit(ctx context.Context, message string) error {
 	_, err := c.run(ctx, "commit", "-m", message)

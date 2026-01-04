@@ -26,6 +26,12 @@ AppModel
 └── ConfirmModel        (overlay dialog)
 ```
 
+## Important Notes
+
+- Agent workspaces are created at `.jj/agents/<name>/` (not repo root)
+- `DeleteWorkspace()` removes both jj workspace and the directory
+- Agent-related messages: `AgentEventMsg`, `AgentSpawnedMsg`, `AgentStoppedMsg`
+
 ## When to Look Here
 
 - UI bugs or styling issues

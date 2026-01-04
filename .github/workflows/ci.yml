@@ -20,4 +20,8 @@ jobs:
           curl -LsSf https://github.com/cargo-bins/cargo-binstall/releases/latest/download/cargo-binstall-x86_64-unknown-linux-musl.tgz | tar xzf - -C /usr/local/bin
           cargo-binstall --no-confirm jj-cli
 
-      - run: go test ./...
+      - name: Build
+        run: go build ./...
+
+      - name: Test
+        run: go test ./...

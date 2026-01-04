@@ -2,11 +2,13 @@ package tui
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/bigq/dojo/internal/agent"
 	"github.com/bigq/dojo/internal/jj"
 )
 
@@ -106,13 +108,13 @@ func (m DiffViewModel) computeWorkDir(workspaceName string) string {
 	if workspaceName == "default" {
 		return "" // Use current directory
 	}
-	// For non-default workspaces, get root and append workspace name
+	// For non-default workspaces, get root and use .jj/agents/<name>
 	ctx := context.Background()
 	root, err := m.jjClient.WorkspaceRoot(ctx)
 	if err != nil {
 		return ""
 	}
-	return root + "/" + workspaceName
+	return filepath.Join(root, agent.AgentsDir, workspaceName)
 }
 
 // View renders the diff view.

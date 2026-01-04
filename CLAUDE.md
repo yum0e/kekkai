@@ -54,7 +54,22 @@ See `specs/0-start.md` for detailed architecture decisions and milestones.
 
 ## Core Concepts
 
-- **Workspaces**: User works in `default`, agents get `agent-*` workspaces
+- **Workspaces**: User works in `default`, agents get `agent-*` workspaces at `.jj/agents/`
 - **Session Restore**: Full state persistence is mandatory for usability
 - **External Editor**: User edits via `$EDITOR`, TUI refreshes on return
 - **Agent Subprocess**: Claude Code CLI spawned per workspace
+
+## Documentation
+
+Each internal package has its own `CLAUDE.md` with package-specific details:
+
+- `internal/jj/CLAUDE.md` - jj CLI wrapper
+- `internal/tui/CLAUDE.md` - TUI components
+- `internal/agent/CLAUDE.md` - Agent process management
+
+**Important**: When modifying behavior in an internal package, update its `CLAUDE.md` to reflect the changes. This includes:
+
+- New or removed functions
+- Changed behavior (e.g., who is responsible for cleanup)
+- New constants or configuration
+- Important usage notes

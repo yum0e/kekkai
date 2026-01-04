@@ -216,10 +216,14 @@ func TestWorkspaceAddAndForget(t *testing.T) {
 			t.Fatalf("WorkspaceForget failed: %v", err)
 		}
 
-		// Verify directory was removed
-		if _, err := os.Stat(agentPath); !os.IsNotExist(err) {
-			t.Error("expected workspace directory to be removed")
+		// WorkspaceForget does NOT remove the directory - caller must do that
+		// Just verify the directory still exists
+		if _, err := os.Stat(agentPath); os.IsNotExist(err) {
+			t.Error("workspace directory should still exist after forget")
 		}
+
+		// Clean up directory manually (as caller would)
+		os.RemoveAll(agentPath)
 
 		// Verify it was removed from jj
 		workspaces, err = c.WorkspaceList(ctx)

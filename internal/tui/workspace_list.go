@@ -3,11 +3,14 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/bigq/dojo/internal/agent"
 	"github.com/bigq/dojo/internal/jj"
 )
 
@@ -137,8 +140,14 @@ func (m WorkspaceListModel) addWorkspace() tea.Cmd {
 			return WorkspaceAddedMsg{Err: err}
 		}
 
-		// Create workspace at root/<name>, based on default's working copy
-		path := root + "/" + name
+		// Ensure agents directory exists
+		agentsDir := filepath.Join(root, agent.AgentsDir)
+		if err := os.MkdirAll(agentsDir, 0755); err != nil {
+			return WorkspaceAddedMsg{Err: err}
+		}
+
+		// Create workspace at .jj/agents/<name>, based on default's working copy
+		path := filepath.Join(agentsDir, name)
 		err = m.jjClient.WorkspaceAdd(ctx, path, "@")
 		return WorkspaceAddedMsg{Name: name, Err: err}
 	}
@@ -261,8 +270,25 @@ func mockAgentStates(workspaces []jj.Workspace) []WorkspaceItem {
 func (m WorkspaceListModel) DeleteWorkspace(name string) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
-		err := m.jjClient.WorkspaceForget(ctx, name)
-		return WorkspaceDeletedMsg{Name: name, Err: err}
+
+		// Get repo root to compute workspace path
+		root, err := m.jjClient.WorkspaceRoot(ctx)
+		if err != nil {
+			return WorkspaceDeletedMsg{Name: name, Err: err}
+		}
+
+		// Forget the workspace from jj
+		if err := m.jjClient.WorkspaceForget(ctx, name); err != nil {
+			return WorkspaceDeletedMsg{Name: name, Err: err}
+		}
+
+		// Remove the workspace directory at .jj/agents/<name>
+		workspacePath := filepath.Join(root, agent.AgentsDir, name)
+		if err := os.RemoveAll(workspacePath); err != nil {
+			return WorkspaceDeletedMsg{Name: name, Err: err}
+		}
+
+		return WorkspaceDeletedMsg{Name: name, Err: nil}
 	}
 }
 
