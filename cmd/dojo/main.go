@@ -21,6 +21,9 @@ func main() {
 	// Set program reference for event subscription
 	app.SetProgram(p)
 
+	// Start event listener with stable app pointer (must be after SetProgram)
+	app.StartEventListener()
+
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)

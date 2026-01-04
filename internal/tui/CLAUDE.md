@@ -28,7 +28,7 @@ AppModel
 │   ├── ChatViewModel   (Chat tab - agent interaction)
 │   └── DiffViewModel   (Diff tab - jj diff output)
 ├── ConfirmModel        (overlay dialog)
-└── agentManager        (lazy init, manages agent processes)
+└── agentManager        (eager init in NewApp, manages agent processes)
 ```
 
 ## Chat View Features
@@ -45,12 +45,31 @@ AppModel
 - Default workspace has no Chat tab (user-only workspace)
 - Tab preference remembered per workspace
 
+## App Initialization Sequence
+
+The correct initialization order in `main()` is critical:
+
+```go
+app, _ := tui.NewApp()           // 1. Create app (creates agentManager eagerly)
+p := tea.NewProgram(app, ...)    // 2. Create tea.Program
+app.SetProgram(p)                // 3. Set program reference
+app.StartEventListener()         // 4. Start event listener goroutine
+p.Run()                          // 5. Run the TUI
+app.Shutdown()                   // 6. Cleanup on exit
+```
+
+### Why This Order Matters
+
+- **agentManager is created eagerly in `NewApp()`** - not lazily, because the event listener needs a stable reference
+- **`StartEventListener()` MUST be called from `main()`** - NOT from `Update()`. Bubbletea's Update method operates on model copies, so goroutines started from Update hold stale pointers to copied structs
+- **`SetProgram()` before `StartEventListener()`** - the listener needs the program reference to send events
+
 ## Important Notes
 
 - Agent workspaces are created at `.jj/agents/<name>/` (not repo root)
 - `DeleteWorkspace()` removes both jj workspace and the directory
-- Agent events flow: manager.Events() -> listenAgentEvents goroutine -> tea.Program.Send()
-- `SetProgram()` must be called after creating tea.Program for event subscription
+- Agent events flow: `manager.Events()` → `StartEventListener` goroutine → `tea.Program.Send()`
+- Error messages from agent are shown in chat (stderr captured, SendInput errors displayed)
 
 ## Key Messages
 

@@ -59,6 +59,20 @@ See `specs/0-start.md` for detailed architecture decisions and milestones.
 - **External Editor**: User edits via `$EDITOR`, TUI refreshes on return
 - **Agent Subprocess**: Claude Code CLI spawned per workspace
 
+## Claude Code Integration
+
+Agents are spawned using Claude Code CLI with streaming JSON:
+
+```bash
+claude -p --verbose --input-format stream-json --output-format stream-json
+```
+
+Key details:
+- `-p` (print mode) is required for non-interactive use
+- `--verbose` is required when using `--output-format stream-json`
+- Input messages are NDJSON: `{"type":"user","message":{"role":"user","content":[{"type":"text","text":"..."}]}}`
+- See `internal/agent/CLAUDE.md` for full protocol details
+
 ## Documentation
 
 Each internal package has its own `CLAUDE.md` with package-specific details:

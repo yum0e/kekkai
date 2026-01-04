@@ -27,6 +27,37 @@ Manager
 └── ...
 ```
 
+## Claude CLI Invocation
+
+The claude subprocess is started with these flags:
+
+```bash
+claude -p --verbose --input-format stream-json --output-format stream-json
+```
+
+| Flag                           | Required | Purpose                                      |
+| ------------------------------ | -------- | -------------------------------------------- |
+| `-p`                           | Yes      | Print mode (non-interactive)                 |
+| `--verbose`                    | Yes      | Required when using `--output-format stream-json` |
+| `--input-format stream-json`   | Yes      | Accept streaming JSON input on stdin         |
+| `--output-format stream-json`  | Yes      | Output streaming JSON on stdout              |
+
+### Input Message Format
+
+User messages must be sent as NDJSON (newline-delimited JSON):
+
+```json
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"user message here"}]}}
+```
+
+### Output Message Format
+
+Claude outputs events as NDJSON. Key event types:
+- `assistant` - Contains text or tool_use content blocks
+- `result` - Completion indicator
+- `error` - Error occurred
+- `system` - Informational (ignored)
+
 ## Key Constants
 
 ```go
@@ -80,6 +111,22 @@ if err == nil {
 | `EventError`       | `ErrorData`       | Error occurred            |
 | `EventStateChange` | `StateChangeData` | Agent state changed       |
 
+## Important Implementation Details
+
+### Shutdown Safety
+- `Manager.Shutdown()` uses `sync.Once` to prevent double-close of the events channel
+- Always call `Shutdown()` when the app exits to clean up processes
+
+### Error Visibility
+- Stderr from claude is captured and emitted as `EventError` with `[stderr]` prefix
+- Parse errors include the raw line that failed to parse
+- `SendInput` returns proper errors (not silent failures)
+
+### Testing
+- Use `InjectProcessForTest()` to inject mock processes
+- Use `EventsWritable()` to get writable channel for testing
+- Use `GetRunningProcess()` which checks mock processes first
+
 ## When to Look Here
 
 - Agent lifecycle issues (spawn, stop, crash)
@@ -87,3 +134,4 @@ if err == nil {
 - Adding new event types
 - PID file / orphan detection
 - Process signal handling
+- Claude CLI flag changes (check `process.go:Start()`)

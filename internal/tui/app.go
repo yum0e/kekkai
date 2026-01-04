@@ -49,11 +49,16 @@ func NewApp() (*AppModel, error) {
 		return nil, fmt.Errorf("failed to detect jj repository: %w", err)
 	}
 
+	// Create agent manager eagerly so the event listener can be started
+	// from main() with a stable pointer (not from Update which uses copies)
+	agentManager := agent.NewManager(agent.DefaultConfig(), client)
+
 	app := &AppModel{
 		workspaceList: NewWorkspaceListModel(client),
 		rightPane:     NewRightPaneModel(client),
 		confirm:       NewConfirmModel(),
 		jjClient:      client,
+		agentManager:  agentManager,
 		focusedPane:   FocusWorkspaceList,
 	}
 
@@ -69,24 +74,17 @@ func (m *AppModel) SetProgram(p *tea.Program) {
 	m.program = p
 }
 
-// ensureAgentManager lazily initializes the agent manager.
-func (m *AppModel) ensureAgentManager() *agent.Manager {
-	if m.agentManager == nil {
-		m.agentManager = agent.NewManager(agent.DefaultConfig(), m.jjClient)
-		// Start event listener goroutine
-		go m.listenAgentEvents()
-	}
-	return m.agentManager
-}
-
-// listenAgentEvents reads from the manager's event channel and sends to tea.Program.
-func (m *AppModel) listenAgentEvents() {
-	if m.agentManager == nil || m.program == nil {
-		return
-	}
-	for evt := range m.agentManager.Events() {
-		m.program.Send(AgentEventMsg{Event: evt})
-	}
+// StartEventListener starts the goroutine that reads agent events and sends them to the TUI.
+// This MUST be called from main() after SetProgram(), not from Update(), because Update
+// operates on model copies and goroutines started there would hold stale pointers.
+func (m *AppModel) StartEventListener() {
+	go func() {
+		for evt := range m.agentManager.Events() {
+			if m.program != nil {
+				m.program.Send(AgentEventMsg{Event: evt})
+			}
+		}
+	}()
 }
 
 // Shutdown cleans up resources.
@@ -163,12 +161,11 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case SpawnAgentMsg:
-		// Lazy init manager and start agent in existing workspace
-		mgr := m.ensureAgentManager()
+		// Start agent in existing workspace
 		return m, func() tea.Msg {
 			ctx := context.Background()
 			// Use StartAgent since workspace already exists
-			err := mgr.StartAgent(ctx, msg.WorkspaceName)
+			err := m.agentManager.StartAgent(ctx, msg.WorkspaceName)
 			return SpawnAgentResultMsg{
 				WorkspaceName: msg.WorkspaceName,
 				Success:       err == nil,
@@ -193,29 +190,37 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ChatInputMsg:
 		// Send input to agent asynchronously to avoid blocking TUI
-		if m.agentManager != nil {
-			proc, err := m.agentManager.GetProcess(msg.Workspace)
-			if err == nil {
-				return m, func() tea.Msg {
-					_ = proc.SendInput(msg.Input)
-					return nil // No result message needed
-				}
+		proc, err := m.agentManager.GetRunningProcess(msg.Workspace)
+		if err != nil {
+			// Agent not found - emit error event so user knows message wasn't sent
+			return m, func() tea.Msg {
+				return AgentEventMsg{Event: agent.Event{
+					AgentName: msg.Workspace,
+					Type:      agent.EventError,
+					Data:      agent.ErrorData{Message: fmt.Sprintf("Agent not found for workspace '%s': %v", msg.Workspace, err)},
+				}}
 			}
 		}
-		return m, nil
+		return m, func() tea.Msg {
+			if err := proc.SendInput(msg.Input); err != nil {
+				return AgentEventMsg{Event: agent.Event{
+					AgentName: msg.Workspace,
+					Type:      agent.EventError,
+					Data:      agent.ErrorData{Message: fmt.Sprintf("Failed to send to '%s': %v", msg.Workspace, err)},
+				}}
+			}
+			return nil
+		}
 
 	case RestartAgentMsg:
-		if m.agentManager != nil {
-			return m, func() tea.Msg {
-				ctx := context.Background()
-				err := m.agentManager.RestartAgent(ctx, msg.WorkspaceName)
-				if err != nil {
-					return AgentCrashedMsg{WorkspaceName: msg.WorkspaceName, Error: err}
-				}
-				return SpawnAgentResultMsg{WorkspaceName: msg.WorkspaceName, Success: true}
+		return m, func() tea.Msg {
+			ctx := context.Background()
+			err := m.agentManager.RestartAgent(ctx, msg.WorkspaceName)
+			if err != nil {
+				return AgentCrashedMsg{WorkspaceName: msg.WorkspaceName, Error: err}
 			}
+			return SpawnAgentResultMsg{WorkspaceName: msg.WorkspaceName, Success: true}
 		}
-		return m, nil
 
 	case AgentEventMsg:
 		// Route to right pane

@@ -47,11 +47,13 @@ func DefaultConfig() ManagerConfig {
 
 // Manager manages agent processes.
 type Manager struct {
-	config    ManagerConfig
-	processes map[string]*Process
-	events    chan Event
-	jjClient  *jj.Client
-	mu        sync.RWMutex
+	config        ManagerConfig
+	processes     map[string]*Process
+	mockProcesses map[string]RunningProcess // For testing only
+	events        chan Event
+	jjClient      *jj.Client
+	mu            sync.RWMutex
+	shutdownOnce  sync.Once // Ensures Shutdown only runs once
 }
 
 // NewManager creates a new agent manager.
@@ -64,10 +66,11 @@ func NewManager(cfg ManagerConfig, jjClient *jj.Client) *Manager {
 	}
 
 	return &Manager{
-		config:    cfg,
-		processes: make(map[string]*Process),
-		events:    make(chan Event, 100),
-		jjClient:  jjClient,
+		config:        cfg,
+		processes:     make(map[string]*Process),
+		mockProcesses: make(map[string]RunningProcess),
+		events:        make(chan Event, 100),
+		jjClient:      jjClient,
 	}
 }
 
@@ -370,6 +373,24 @@ func (m *Manager) GetProcess(name string) (*Process, error) {
 	return proc, nil
 }
 
+// GetRunningProcess returns the RunningProcess interface for an agent.
+// This checks mock processes first (for testing), then real processes.
+func (m *Manager) GetRunningProcess(name string) (RunningProcess, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	// Check mock processes first (for testing)
+	if mock, exists := m.mockProcesses[name]; exists {
+		return mock, nil
+	}
+
+	proc, exists := m.processes[name]
+	if !exists {
+		return nil, ErrAgentNotFound
+	}
+	return proc, nil
+}
+
 // ListAgents returns all agent names and states.
 func (m *Manager) ListAgents() map[string]State {
 	m.mu.RLock()
@@ -384,22 +405,25 @@ func (m *Manager) ListAgents() map[string]State {
 
 // Shutdown stops all agents gracefully.
 func (m *Manager) Shutdown(ctx context.Context) error {
-	m.mu.Lock()
-	names := make([]string, 0, len(m.processes))
-	for name := range m.processes {
-		names = append(names, name)
-	}
-	m.mu.Unlock()
-
 	var lastErr error
-	for _, name := range names {
-		if err := m.StopAgent(name); err != nil {
-			lastErr = err
-		}
-	}
 
-	// Close events channel
-	close(m.events)
+	m.shutdownOnce.Do(func() {
+		m.mu.Lock()
+		names := make([]string, 0, len(m.processes))
+		for name := range m.processes {
+			names = append(names, name)
+		}
+		m.mu.Unlock()
+
+		for _, name := range names {
+			if err := m.StopAgent(name); err != nil {
+				lastErr = err
+			}
+		}
+
+		// Close events channel
+		close(m.events)
+	})
 
 	return lastErr
 }
@@ -467,4 +491,18 @@ func (m *Manager) KillOrphan(pid int) error {
 // findProcess finds a process by PID (platform-specific).
 func findProcess(pid int) (interface{ Kill() error }, error) {
 	return findProcessByPID(pid)
+}
+
+// InjectProcessForTest allows tests to inject mock processes.
+// This is only for testing - do not use in production code.
+func (m *Manager) InjectProcessForTest(name string, proc RunningProcess) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.mockProcesses[name] = proc
+}
+
+// EventsWritable returns a writable events channel for testing.
+// This is only for testing - do not use in production code.
+func (m *Manager) EventsWritable() chan<- Event {
+	return m.events
 }

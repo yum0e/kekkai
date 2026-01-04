@@ -3,6 +3,8 @@ package agent
 import (
 	"bufio"
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"os/exec"
 	"sync"
@@ -47,7 +49,12 @@ func (p *Process) Start(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	p.cancel = cancel
 
-	p.cmd = exec.CommandContext(ctx, "claude", "--output-format", "stream-json")
+	p.cmd = exec.CommandContext(ctx, "claude",
+		"-p",                                // Print mode (non-interactive)
+		"--verbose",                         // Required for stream-json output
+		"--input-format", "stream-json",     // Accept streaming JSON input
+		"--output-format", "stream-json",    // Output streaming JSON
+	)
 	p.cmd.Dir = p.WorkDir
 
 	stdin, err := p.cmd.StdinPipe()
@@ -58,6 +65,12 @@ func (p *Process) Start(ctx context.Context) error {
 	p.stdin = stdin
 
 	stdout, err := p.cmd.StdoutPipe()
+	if err != nil {
+		cancel()
+		return err
+	}
+
+	stderr, err := p.cmd.StderrPipe()
 	if err != nil {
 		cancel()
 		return err
@@ -77,6 +90,9 @@ func (p *Process) Start(ctx context.Context) error {
 
 	// Start output reader goroutine
 	go p.readOutput(stdout)
+
+	// Start stderr reader goroutine for debugging
+	go p.readStderr(stderr)
 
 	// Start process waiter goroutine
 	go p.waitProcess()
@@ -127,16 +143,54 @@ func (p *Process) Stop(timeout time.Duration) error {
 	return nil
 }
 
+// userInputMessage represents the JSON format for user input in stream-json mode.
+// Format matches Claude's expected input structure
+type userInputMessage struct {
+	Type    string      `json:"type"`
+	Message userMessage `json:"message"`
+}
+
+type userMessage struct {
+	Role    string         `json:"role"`
+	Content []contentBlock `json:"content"`
+}
+
+type contentBlock struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
 // SendInput writes to stdin (used by M5 for user input).
+// Input is formatted as stream-json for Claude's --input-format stream-json mode.
 func (p *Process) SendInput(input string) error {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	if p.State != StateRunning || p.stdin == nil {
-		return nil
+	if p.State != StateRunning {
+		return fmt.Errorf("process not running (state=%s)", p.State)
+	}
+	if p.stdin == nil {
+		return fmt.Errorf("stdin is nil")
 	}
 
-	_, err := p.stdin.Write([]byte(input + "\n"))
+	// Format as stream-json user message
+	msg := userInputMessage{
+		Type: "user",
+		Message: userMessage{
+			Role: "user",
+			Content: []contentBlock{
+				{Type: "text", Text: input},
+			},
+		},
+	}
+
+	jsonBytes, err := json.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("failed to marshal input: %w", err)
+	}
+
+	// Write JSON followed by newline (NDJSON format)
+	_, err = p.stdin.Write(append(jsonBytes, '\n'))
 	return err
 }
 
@@ -174,7 +228,7 @@ func (p *Process) readOutput(stdout io.Reader) {
 				AgentName: p.Name,
 				Type:      EventError,
 				Data: ErrorData{
-					Message: "failed to parse event",
+					Message: fmt.Sprintf("failed to parse event: %s (line: %s)", err, string(line)),
 					Err:     err,
 				},
 			})
@@ -195,6 +249,23 @@ func (p *Process) readOutput(stdout io.Reader) {
 				Err:     err,
 			},
 		})
+	}
+}
+
+// readStderr reads stderr and emits as error events for debugging.
+func (p *Process) readStderr(stderr io.Reader) {
+	scanner := bufio.NewScanner(stderr)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line != "" {
+			p.emit(Event{
+				AgentName: p.Name,
+				Type:      EventError,
+				Data: ErrorData{
+					Message: fmt.Sprintf("[stderr] %s", line),
+				},
+			})
+		}
 	}
 }
 
