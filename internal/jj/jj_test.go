@@ -9,18 +9,19 @@ import (
 	"testing"
 )
 
-// skipIfNoJJ skips the test if jj is not installed.
-func skipIfNoJJ(t *testing.T) {
+// requireJJ fails the test if jj is not installed.
+func requireJJ(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("jj"); err != nil {
-		t.Skip("jj is not installed, skipping integration test")
+		t.Fatal("jj is not installed")
 	}
 }
+
 
 // setupTestRepo creates a temporary jj repository for testing.
 func setupTestRepo(t *testing.T) (repoPath string, cleanup func()) {
 	t.Helper()
-	skipIfNoJJ(t)
+	requireJJ(t)
 
 	tmpDir, err := os.MkdirTemp("", "jj-test-*")
 	if err != nil {
@@ -29,35 +30,23 @@ func setupTestRepo(t *testing.T) (repoPath string, cleanup func()) {
 
 	cleanup = func() { os.RemoveAll(tmpDir) }
 
-	// Initialize git repo first
-	cmd := exec.Command("git", "init")
+	// Initialize jj repo
+	cmd := exec.Command("jj", "git", "init")
 	cmd.Dir = tmpDir
 	if err := cmd.Run(); err != nil {
 		cleanup()
-		t.Fatalf("failed to init git repo: %v", err)
+		t.Fatalf("failed to init repository: %v", err)
 	}
 
-	// Configure git user for commits
-	cmd = exec.Command("git", "config", "user.email", "test@example.com")
-	cmd.Dir = tmpDir
-	if err := cmd.Run(); err != nil {
+	// Configure user via .jj/repo/config.toml
+	configPath := filepath.Join(tmpDir, ".jj", "repo", "config.toml")
+	configContent := `[user]
+name = "Test User"
+email = "test@example.com"
+`
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
 		cleanup()
-		t.Fatalf("failed to configure git email: %v", err)
-	}
-
-	cmd = exec.Command("git", "config", "user.name", "Test User")
-	cmd.Dir = tmpDir
-	if err := cmd.Run(); err != nil {
-		cleanup()
-		t.Fatalf("failed to configure git name: %v", err)
-	}
-
-	// Initialize jj with colocate
-	cmd = exec.Command("jj", "git", "init", "--colocate")
-	cmd.Dir = tmpDir
-	if err := cmd.Run(); err != nil {
-		cleanup()
-		t.Fatalf("failed to init jj repo: %v", err)
+		t.Fatalf("failed to write jj config: %v", err)
 	}
 
 	return tmpDir, cleanup
@@ -140,7 +129,7 @@ func TestNewClient(t *testing.T) {
 
 // TestRunInNonRepo tests that running in a non-jj directory returns ErrNotJJRepo.
 func TestRunInNonRepo(t *testing.T) {
-	skipIfNoJJ(t)
+	requireJJ(t)
 
 	tmpDir, err := os.MkdirTemp("", "non-jj-*")
 	if err != nil {
@@ -227,7 +216,12 @@ func TestWorkspaceAddAndForget(t *testing.T) {
 			t.Fatalf("WorkspaceForget failed: %v", err)
 		}
 
-		// Verify it was removed
+		// Verify directory was removed
+		if _, err := os.Stat(agentPath); !os.IsNotExist(err) {
+			t.Error("expected workspace directory to be removed")
+		}
+
+		// Verify it was removed from jj
 		workspaces, err = c.WorkspaceList(ctx)
 		if err != nil {
 			t.Fatalf("WorkspaceList failed: %v", err)
@@ -518,10 +512,18 @@ func TestSquash(t *testing.T) {
 		c := NewClient()
 		ctx := context.Background()
 
-		// Create a file
+		// Create a file and commit it first (can't squash into root commit)
 		testFile := filepath.Join(repoPath, "test.txt")
 		if err := os.WriteFile(testFile, []byte("hello"), 0644); err != nil {
 			t.Fatalf("failed to write test file: %v", err)
+		}
+		if err := c.Commit(ctx, "initial file"); err != nil {
+			t.Fatalf("Commit failed: %v", err)
+		}
+
+		// Now make another change in the new working copy
+		if err := os.WriteFile(testFile, []byte("hello world"), 0644); err != nil {
+			t.Fatalf("failed to modify test file: %v", err)
 		}
 
 		// Squash should work (squashes into parent)

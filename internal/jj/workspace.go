@@ -2,6 +2,9 @@ package jj
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -29,10 +32,27 @@ func (c *Client) WorkspaceAdd(ctx context.Context, path, revision string) error 
 	return err
 }
 
-// WorkspaceForget removes a workspace without deleting its directory.
+// WorkspaceForget removes a workspace and deletes its directory.
+// The workspace directory is assumed to be at <repo_root>/<name>.
 func (c *Client) WorkspaceForget(ctx context.Context, name string) error {
-	_, err := c.run(ctx, "workspace", "forget", name)
-	return err
+	// Get repo root before forgetting (need it to compute workspace path)
+	root, err := c.WorkspaceRoot(ctx)
+	if err != nil {
+		return err
+	}
+
+	_, err = c.run(ctx, "workspace", "forget", name)
+	if err != nil {
+		return err
+	}
+
+	// Remove workspace directory
+	path := filepath.Join(root, name)
+	if err := os.RemoveAll(path); err != nil {
+		return fmt.Errorf("failed to remove workspace directory: %w", err)
+	}
+
+	return nil
 }
 
 // WorkspaceList returns all workspaces in the repository.
