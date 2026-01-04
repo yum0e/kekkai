@@ -32,7 +32,11 @@ type Process struct {
 	mu sync.RWMutex
 }
 
-const gitShimDirName = ".dojo-bin"
+const (
+	gitShimBaseDir       = ".jj"
+	gitShimDirName       = ".dojo-bin"
+	claudePermissionMode = "acceptEdits"
+)
 
 // NewProcess creates a new Process instance.
 func NewProcess(name, workDir string, events chan<- Event) *Process {
@@ -52,7 +56,7 @@ func gitShimSpec() (string, []byte, os.FileMode) {
 }
 
 func (p *Process) ensureGitShim() (string, error) {
-	dir := filepath.Join(p.WorkDir, gitShimDirName)
+	dir := filepath.Join(p.WorkDir, gitShimBaseDir, gitShimDirName)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return "", err
 	}
@@ -136,6 +140,7 @@ func (p *Process) Start(ctx context.Context) error {
 		"--input-format", "stream-json",     // Accept streaming JSON input
 		"--output-format", "stream-json",    // Output streaming JSON
 		"--add-dir", p.WorkDir,              // Allow editing files in workspace
+		"--permission-mode", claudePermissionMode, // Auto-accept edits within allowed dirs
 	)
 	p.cmd.Dir = p.WorkDir // This is the cd - process starts in workspace
 

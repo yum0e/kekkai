@@ -32,7 +32,7 @@ Manager
 The claude subprocess is started with these flags:
 
 ```bash
-cd <workspace> && claude -p --verbose --input-format stream-json --output-format stream-json --add-dir <workspace>
+cd <workspace> && claude -p --verbose --input-format stream-json --output-format stream-json --add-dir <workspace> --permission-mode acceptEdits
 ```
 
 | Flag                           | Required | Purpose                                      |
@@ -42,6 +42,7 @@ cd <workspace> && claude -p --verbose --input-format stream-json --output-format
 | `--input-format stream-json`   | Yes      | Accept streaming JSON input on stdin         |
 | `--output-format stream-json`  | Yes      | Output streaming JSON on stdout              |
 | `--add-dir <workspace>`        | Yes      | Allow editing files in the agent's workspace |
+| `--permission-mode acceptEdits` | Yes     | Auto-accept edits inside allowed directories |
 
 Note: The `cd` is done via `cmd.Dir` in Go, which sets the process working directory.
 
@@ -138,7 +139,7 @@ if err == nil {
 ### Workspace Isolation
 - Each agent's working directory is set to its workspace via `cmd.Dir`
 - `--add-dir` restricts file editing to the workspace only
-- Agent PATH is prefixed with a workspace-local shim that blocks `git` (forces `jj`)
+- Agent PATH is prefixed with a workspace-local shim at `.jj/.dojo-bin` that blocks `git` (forces `jj`)
 - Agents see full project context (jj provides revision-level isolation)
 
 ### Testing

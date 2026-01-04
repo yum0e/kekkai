@@ -820,8 +820,9 @@ func TestEnsureGitShimCreatesFile(t *testing.T) {
 		t.Fatalf("ensureGitShim() error = %v", err)
 	}
 
-	if shimDir != filepath.Join(tmpDir, gitShimDirName) {
-		t.Fatalf("ensureGitShim() dir = %v, want %v", shimDir, filepath.Join(tmpDir, gitShimDirName))
+	expectedDir := filepath.Join(tmpDir, gitShimBaseDir, gitShimDirName)
+	if shimDir != expectedDir {
+		t.Fatalf("ensureGitShim() dir = %v, want %v", shimDir, expectedDir)
 	}
 
 	name, _, _ := gitShimSpec()
