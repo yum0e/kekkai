@@ -18,11 +18,12 @@ type Process struct {
 	WorkDir string
 	State   State
 
-	cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	cancel context.CancelFunc
-	events chan<- Event
-	pid    int
+	cmd      *exec.Cmd
+	stdin    io.WriteCloser
+	cancel   context.CancelFunc
+	events   chan<- Event
+	pid      int
+	stopping bool // True when Stop() is called intentionally
 
 	mu sync.RWMutex
 }
@@ -109,6 +110,9 @@ func (p *Process) Stop(timeout time.Duration) error {
 		p.mu.Unlock()
 		return nil
 	}
+
+	// Mark as intentionally stopping (prevents error event on exit)
+	p.stopping = true
 
 	// Close stdin to signal EOF
 	if p.stdin != nil {
@@ -279,7 +283,10 @@ func (p *Process) waitProcess() {
 
 	p.mu.Lock()
 	oldState := p.State
-	if err != nil {
+	intentionallyStopped := p.stopping
+
+	if err != nil && !intentionallyStopped {
+		// Only set error state if this wasn't an intentional stop
 		p.State = StateError
 		p.emit(Event{
 			AgentName: p.Name,

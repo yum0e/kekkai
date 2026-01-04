@@ -117,6 +117,11 @@ if err == nil {
 - `Manager.Shutdown()` uses `sync.Once` to prevent double-close of the events channel
 - Always call `Shutdown()` when the app exits to clean up processes
 
+### Intentional Stop vs Crash
+- `Process.Stop()` sets a `stopping` flag before sending SIGTERM
+- `waitProcess()` checks this flag and only emits `EventError` for unexpected crashes
+- Intentional stops (via `Stop()`, `RestartAgent()`, etc.) result in `StateStopped`, not `StateError`
+
 ### Stale Workspace Handling
 - `StartAgent()` automatically calls `jj workspace update-stale` before starting
 - This prevents "stale working copy" errors when default workspace has changed
