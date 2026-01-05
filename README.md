@@ -82,12 +82,18 @@ Without Watchman, jj only captures changes when you run a `jj` command. With Wat
 
 1. [Install Watchman](https://facebook.github.io/watchman/docs/install)
 2. Enable in `~/.config/jj/config.toml`:
-   ```toml
-   # ~/.config/jj/config.toml
-   [fsmonitor]
-   backend = "watchman"
-   watchman.register-snapshot-trigger = true
-   ```
+
+```toml
+# ~/.config/jj/config.toml
+[fsmonitor]
+backend = "watchman"
+watchman.register-snapshot-trigger = true
+
+# highly recommend auto updating stale snapshots as well
+[snapshot]
+auto-update-stale = true
+```
+
 3. Verify: `jj debug watchman status`
 
 ## Development
