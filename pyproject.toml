@@ -13,6 +13,9 @@ authors = [
     { name = "yum0e" }
 ]
 keywords = ["jj", "jujutsu", "claude", "agent", "workspace"]
+dependencies = [
+    "rich>=13.0",
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",

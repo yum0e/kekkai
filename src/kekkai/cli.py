@@ -9,6 +9,8 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from rich.console import Console
+
 from .errors import NotJJRepoError, WorkspaceExistsError
 from .jj import JJClient
 
@@ -134,76 +136,89 @@ def cleanup(
 def run_agent(name: str) -> None:
     """Create workspace and run Claude agent."""
     client = JJClient()
+    console = Console()
 
-    # 1. Find root workspace
-    try:
-        root = find_root_workspace(client)
-    except NotJJRepoError:
-        print("Error: not in a jj repository", file=sys.stderr)
-        sys.exit(1)
+    with console.status("Summoning...", spinner="dots"):
+        # 1. Find root workspace
+        try:
+            root = find_root_workspace(client)
+        except NotJJRepoError:
+            console.print("Error: not in a jj repository", style="red")
+            sys.exit(1)
 
-    # 2. Check parent directory is writable
-    try:
-        check_parent_writable(root)
-    except PermissionError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+        # 2. Check parent directory is writable
+        try:
+            check_parent_writable(root)
+        except PermissionError as e:
+            console.print(f"Error: {e}", style="red")
+            sys.exit(1)
 
-    # 3. Compute sibling workspace path
-    workspace_path = compute_agent_path(root, name)
-    shim_path = Path(workspace_path) / SHIM_DIR
-    jj_workspace_name = compute_jj_workspace_name(root, name)
+        # 3. Compute sibling workspace path
+        workspace_path = compute_agent_path(root, name)
+        shim_path = Path(workspace_path) / SHIM_DIR
+        jj_workspace_name = compute_jj_workspace_name(root, name)
 
-    # 4. Create workspace via jj workspace add
-    try:
-        client.workspace_add(workspace_path, cwd=root)
-    except WorkspaceExistsError:
-        print(f"Error: workspace '{name}' already exists", file=sys.stderr)
-        print("Use 'kekkai list' to see existing workspaces", file=sys.stderr)
-        sys.exit(1)
-    except Exception as e:
-        print(f"Error creating workspace: {e}", file=sys.stderr)
-        sys.exit(1)
+        # 4. Create workspace via jj workspace add
+        try:
+            client.workspace_add(workspace_path, cwd=root)
+        except WorkspaceExistsError:
+            console.print(f"Error: workspace '{name}' already exists", style="red")
+            console.print("Use 'kekkai list' to see existing workspaces")
+            sys.exit(1)
+        except Exception as e:
+            console.print(f"Error creating workspace: {e}", style="red")
+            sys.exit(1)
 
-    # 5. Register watchman trigger by running jj in the new workspace
-    try:
-        client.status(cwd=workspace_path)
-    except Exception:
-        pass  # Non-fatal if this fails
+        # 5. Configure jj to auto-update stale working copies
+        try:
+            subprocess.run(
+                ["jj", "config", "set", "--repo", "snapshot.auto-update-stale", "true"],
+                cwd=workspace_path,
+                capture_output=True,
+                check=True,
+            )
+        except Exception:
+            pass  # Non-fatal if this fails
 
-    # 6. Create .git directory (scopes Claude to workspace)
-    git_dir = Path(workspace_path) / ".git"
-    try:
-        git_dir.mkdir(parents=True, exist_ok=True)
-    except OSError as e:
-        print(f"Error creating .git directory: {e}", file=sys.stderr)
-        cleanup(client, jj_workspace_name, workspace_path, root)
-        sys.exit(1)
+        # 6. Register watchman trigger by running jj in the new workspace
+        try:
+            client.status(cwd=workspace_path)
+        except Exception:
+            pass  # Non-fatal if this fails
 
-    # 7. Create agent marker file
-    try:
-        create_agent_marker(workspace_path, root, name)
-    except OSError as e:
-        print(f"Error creating agent marker: {e}", file=sys.stderr)
-        cleanup(client, jj_workspace_name, workspace_path, root)
-        sys.exit(1)
+        # 7. Create .git directory (scopes Claude to workspace)
+        git_dir = Path(workspace_path) / ".git"
+        try:
+            git_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            console.print(f"Error creating .git directory: {e}", style="red")
+            cleanup(client, jj_workspace_name, workspace_path, root)
+            sys.exit(1)
 
-    # 8. Create git shim
-    try:
-        shim_path.mkdir(parents=True, exist_ok=True)
-        shim_script = shim_path / "git"
-        shim_script.write_text(SHIM_CONTENT)
-        shim_script.chmod(0o755)
-    except OSError as e:
-        print(f"Error creating git shim: {e}", file=sys.stderr)
-        cleanup(client, jj_workspace_name, workspace_path, root)
-        sys.exit(1)
+        # 8. Create agent marker file
+        try:
+            create_agent_marker(workspace_path, root, name)
+        except OSError as e:
+            console.print(f"Error creating agent marker: {e}", style="red")
+            cleanup(client, jj_workspace_name, workspace_path, root)
+            sys.exit(1)
 
-    # 9. Build env with shim in PATH
-    env = os.environ.copy()
-    env["PATH"] = f"{shim_path}:{env.get('PATH', '')}"
+        # 9. Create git shim
+        try:
+            shim_path.mkdir(parents=True, exist_ok=True)
+            shim_script = shim_path / "git"
+            shim_script.write_text(SHIM_CONTENT)
+            shim_script.chmod(0o755)
+        except OSError as e:
+            console.print(f"Error creating git shim: {e}", style="red")
+            cleanup(client, jj_workspace_name, workspace_path, root)
+            sys.exit(1)
 
-    # 10. Run claude with terminal passthrough
+        # 10. Build env with shim in PATH
+        env = os.environ.copy()
+        env["PATH"] = f"{shim_path}:{env.get('PATH', '')}"
+
+    # 11. Run claude with terminal passthrough (outside spinner)
     result = subprocess.run(["claude"], cwd=workspace_path, env=env)
 
     if result.returncode != 0:

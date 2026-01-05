@@ -17,6 +17,7 @@ from kekkai.cli import (
     compute_jj_workspace_name,
     create_agent_marker,
     find_root_workspace,
+    run_agent,
 )
 from kekkai.jj import JJClient
 
@@ -299,3 +300,52 @@ def test_list_workspaces_with_agents(temp_jj_repo):
                 found_agents.append(agent_name)
 
     assert len(found_agents) == 2
+
+
+def test_spinner_shown_during_setup(temp_jj_repo, monkeypatch):
+    """Test that spinner is shown during workspace setup before Claude launches."""
+    from io import StringIO
+
+    from rich.console import Console
+
+    # Create mock claude binary that records when it was called
+    mock_bin = temp_jj_repo / "mock-bin"
+    mock_bin.mkdir()
+    mock_claude = mock_bin / "claude"
+    call_marker = temp_jj_repo / "claude-called"
+    mock_claude.write_text(f"#!/bin/sh\ntouch {call_marker}\nexit 0\n")
+    mock_claude.chmod(0o755)
+
+    # Prepend mock bin to PATH
+    original_path = os.environ.get("PATH", "")
+    monkeypatch.setenv("PATH", f"{mock_bin}:{original_path}")
+
+    # Mock input() to auto-answer cleanup prompt with 'n'
+    monkeypatch.setattr("builtins.input", lambda _: "n")
+
+    # Capture console output by forcing terminal mode with a file output
+    output_buffer = StringIO()
+
+    # Patch Console to capture spinner output
+    class TestConsole(Console):
+        def __init__(self, *args, **kwargs):
+            kwargs["force_terminal"] = True
+            kwargs["file"] = output_buffer
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr("kekkai.cli.Console", TestConsole)
+
+    # Change to temp repo directory
+    old_cwd = os.getcwd()
+    os.chdir(temp_jj_repo)
+    try:
+        run_agent("spinner-test")
+    finally:
+        os.chdir(old_cwd)
+
+    # Verify mock claude was called (workspace setup completed)
+    assert call_marker.exists(), "Mock claude should have been called"
+
+    # Verify spinner message was shown
+    output = output_buffer.getvalue().lower()
+    assert "summoning" in output, f"Spinner message not found in output: {output}"
