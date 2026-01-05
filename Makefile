@@ -1,17 +1,13 @@
-.PHONY: build run clean test
+.PHONY: run test clean
 
-# Build the binary
-build:
-	go build -o dojo ./cmd/dojo
-
-# Build and run
-run: build
-	./dojo
+# Run the CLI
+run:
+	uv run kekkai
 
 # Run tests
 test:
-	go test ./...
+	uv run --with pytest pytest tests/ -v
 
 # Clean build artifacts
 clean:
-	rm -f dojo
+	rm -rf .venv .pytest_cache __pycache__ src/kekkai/__pycache__ tests/__pycache__

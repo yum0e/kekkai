@@ -1,4 +1,4 @@
-# Dojo
+# Kekkai
 
 A minimal CLI that launches Claude Code in isolated jj workspaces.
 
@@ -6,13 +6,13 @@ A minimal CLI that launches Claude Code in isolated jj workspaces.
 
 ```bash
 # Launch Claude in a new workspace
-dojo feature-auth
+kekkai feature-auth
 
 # List existing workspaces
-dojo list
+kekkai list
 ```
 
-When you run `dojo <name>`:
+When you run `kekkai <name>`:
 1. Creates an isolated jj workspace as a sibling directory (`<repo>-<name>/`)
 2. Launches Claude Code with full terminal experience
 3. On exit, warns about uncommitted changes if any
@@ -20,7 +20,7 @@ When you run `dojo <name>`:
 
 ## Requirements
 
-- Go 1.24+
+- Python 3.10+
 - [Claude Code](https://claude.ai/code) installed and in PATH
 - [Jujutsu (jj)](https://github.com/martinvonz/jj) installed and in PATH
 - Must be run from inside a jj repository
@@ -28,14 +28,19 @@ When you run `dojo <name>`:
 ## Installation
 
 ```bash
-go install github.com/bigq/dojo/cmd/dojo@latest
+# Using uvx (recommended)
+uvx kekkai
+
+# Or install with pip
+pip install kekkai
 ```
 
-Or build from source:
+For development:
 
 ```bash
-make build
-./dojo
+git clone https://github.com/bigq/dojo
+cd dojo
+uv run kekkai --help
 ```
 
 ## How It Works
@@ -53,7 +58,7 @@ Agent workspaces are created as siblings to your repository:
 This structure enables:
 - **Full copy**: Agent workspaces get a complete copy of the repository including `.claude/`
 - **Better visibility**: Workspaces are easily accessible, not hidden in `.jj/`
-- **Clean jj status**: Dojo markers are auto-ignored by jj
+- **Clean jj status**: Kekkai markers are auto-ignored by jj
 
 ### Workspace Isolation
 
@@ -61,7 +66,7 @@ Each agent runs in its own jj workspace with:
 - **Separate revision**: Changes don't affect your main workspace
 - **Git shim**: Blocks `git` commands, forcing `jj` usage
 - **Scoped root**: Claude sees only the workspace as project root
-- **Marker file**: `.jj/dojo-agent` identifies agent workspaces (auto-ignored)
+- **Marker file**: `.jj/kekkai-agent` identifies agent workspaces (auto-ignored)
 
 ### Multi-Agent Workflow
 
@@ -69,16 +74,16 @@ Run multiple agents by opening multiple terminals:
 
 ```bash
 # Terminal 1
-dojo feature-auth
+kekkai feature-auth
 
 # Terminal 2
-dojo bugfix-login
+kekkai bugfix-login
 
 # Terminal 3
-dojo refactor-api
+kekkai refactor-api
 ```
 
-You can even run `dojo` from inside an agent workspace - it will create a new sibling to the original root.
+You can even run `kekkai` from inside an agent workspace - it will create a new sibling to the original root.
 
 ### Version Control
 
@@ -98,7 +103,9 @@ jj rebase -s <agent-revision> -d @
 ## Development
 
 ```bash
-make build    # Build the binary
-make run      # Build and run
-make clean    # Remove build artifacts
+# Run tests
+uv run --with pytest pytest tests/ -v
+
+# Run the CLI
+uv run kekkai --help
 ```
