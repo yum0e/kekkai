@@ -26,6 +26,12 @@ jobs:
       - name: Build
         run: uv build
 
+      - name: Install jj
+        run: |
+          curl -LsSf https://github.com/cargo-bins/cargo-binstall/releases/latest/download/cargo-binstall-x86_64-unknown-linux-musl.tgz | tar xzf - -C /usr/local/bin
+          cargo-binstall --no-confirm jj-cli
+          jj git init
+
       # Check that basic features work and we didn't miss to include crucial files
       - name: Smoke test (wheel)
         run: uv run --isolated --no-project --with dist/*.whl tests/
