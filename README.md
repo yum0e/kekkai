@@ -13,6 +13,7 @@ kekkai list
 ```
 
 When you run `kekkai <name>`:
+
 1. Creates an isolated jj workspace as a sibling directory (`<repo>-<name>/`)
 2. Launches Claude Code with full terminal experience
 3. On exit, warns about uncommitted changes if any
@@ -54,8 +55,8 @@ pip install kekkai
 For development:
 
 ```bash
-git clone https://github.com/bigq/dojo
-cd dojo
+git clone https://github.com/yum0e/kekkai
+cd kekkai
 uv run kekkai --help
 ```
 
@@ -72,6 +73,7 @@ Agent workspaces are created as siblings to your repository:
 ```
 
 This structure enables:
+
 - **Full copy**: Agent workspaces get a complete copy of the repository including `.claude/`
 - **Better visibility**: Workspaces are easily accessible, not hidden in `.jj/`
 - **Clean jj status**: Kekkai markers are auto-ignored by jj
@@ -79,6 +81,7 @@ This structure enables:
 ### Workspace Isolation
 
 Each agent runs in its own jj workspace with:
+
 - **Separate revision**: Changes don't affect your main workspace
 - **Git shim**: Blocks `git` commands, forcing `jj` usage
 - **Scoped root**: Claude sees only the workspace as project root
