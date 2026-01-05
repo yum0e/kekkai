@@ -308,6 +308,7 @@ func listWorkspaces() {
 	repoName := filepath.Base(root)
 	prefix := repoName + "-"
 
+	var found bool
 	for _, ws := range workspaces {
 		// Skip default workspace
 		if ws.Name == "default" {
@@ -324,7 +325,11 @@ func listWorkspaces() {
 			if _, err := os.Stat(markerPath); err == nil {
 				// Format: name: change-id commit-id summary
 				fmt.Printf("%s: %s %s %s\n", agentName, ws.ChangeID, ws.CommitID, ws.Summary)
+				found = true
 			}
 		}
+	}
+	if !found {
+		fmt.Println("No workspaces")
 	}
 }
