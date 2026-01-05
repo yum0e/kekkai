@@ -13,9 +13,10 @@ dojo list
 ```
 
 When you run `dojo <name>`:
-1. Creates an isolated jj workspace at `.jj/agents/<name>/`
+1. Creates an isolated jj workspace as a sibling directory (`<repo>-<name>/`)
 2. Launches Claude Code with full terminal experience
-3. On exit, prompts whether to keep or delete the workspace
+3. On exit, warns about uncommitted changes if any
+4. Prompts whether to keep or delete the workspace
 
 ## Requirements
 
@@ -39,12 +40,27 @@ make build
 
 ## How It Works
 
+### Workspace Location
+
+Agent workspaces are created as siblings to your repository:
+
+```
+/Users/dev/
+├── myproject/               <- Your repository
+└── myproject-feature-auth/  <- Agent workspace
+```
+
+This structure enables:
+- **Permission inheritance**: Agent workspaces symlink `.claude/` from root, so tool approvals are shared
+- **Better visibility**: Workspaces are easily accessible, not hidden in `.jj/`
+
 ### Workspace Isolation
 
 Each agent runs in its own jj workspace with:
 - **Separate revision**: Changes don't affect your main workspace
 - **Git shim**: Blocks `git` commands, forcing `jj` usage
 - **Scoped root**: Claude sees only the workspace as project root
+- **Marker file**: `.dojo-agent` identifies agent workspaces
 
 ### Multi-Agent Workflow
 
@@ -60,6 +76,8 @@ dojo bugfix-login
 # Terminal 3
 dojo refactor-api
 ```
+
+You can even run `dojo` from inside an agent workspace - it will create a new sibling to the original root.
 
 ### Version Control
 

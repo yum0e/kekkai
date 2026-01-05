@@ -80,3 +80,64 @@ func (c *Client) WorkspaceUpdateStale(ctx context.Context, dir string) error {
 	_, err := c.runInDir(ctx, dir, "workspace", "update-stale")
 	return err
 }
+
+// WorkspaceAddFromDir creates a new workspace at the given path, running from a specific directory.
+// If revision is non-empty, the workspace starts at that revision.
+func (c *Client) WorkspaceAddFromDir(ctx context.Context, dir, path, revision string) error {
+	args := []string{"workspace", "add", path}
+	if revision != "" {
+		args = append(args, "-r", revision)
+	}
+	_, err := c.runInDir(ctx, dir, args...)
+	return err
+}
+
+// WorkspaceForgetFromDir removes a workspace from jj tracking, running from a specific directory.
+// It does NOT delete the workspace directory - caller must handle that.
+func (c *Client) WorkspaceForgetFromDir(ctx context.Context, dir, name string) error {
+	_, err := c.runInDir(ctx, dir, "workspace", "forget", name)
+	return err
+}
+
+// WorkspaceListFromDir returns all workspaces in the repository, running from a specific directory.
+func (c *Client) WorkspaceListFromDir(ctx context.Context, dir string) ([]Workspace, error) {
+	output, err := c.runInDir(ctx, dir, "workspace", "list")
+	if err != nil {
+		return nil, err
+	}
+
+	var workspaces []Workspace
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		if line == "" {
+			continue
+		}
+
+		matches := workspaceLineRegex.FindStringSubmatch(line)
+		if matches == nil {
+			continue
+		}
+
+		workspaces = append(workspaces, Workspace{
+			Name:     matches[1],
+			ChangeID: matches[2],
+			CommitID: matches[3],
+			Summary:  matches[4],
+		})
+	}
+
+	return workspaces, nil
+}
+
+// WorkspaceRootFromDir returns the root directory of the workspace, running from a specific directory.
+func (c *Client) WorkspaceRootFromDir(ctx context.Context, dir string) (string, error) {
+	output, err := c.runInDir(ctx, dir, "workspace", "root")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(output), nil
+}
+
+// StatusFromDir returns the jj status output for a workspace.
+func (c *Client) StatusFromDir(ctx context.Context, dir string) (string, error) {
+	return c.runInDir(ctx, dir, "status")
+}
