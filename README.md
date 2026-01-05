@@ -24,6 +24,22 @@ When you run `kekkai <name>`:
 - [Claude Code](https://claude.ai/code) installed and in PATH
 - [Jujutsu (jj)](https://github.com/martinvonz/jj) installed and in PATH
 - Must be run from inside a jj repository
+- [Watchman](https://facebook.github.io/watchman/) (**highly recommended**) - enables automatic snapshotting across workspaces
+
+### Watchman Setup
+
+**Without Watchman**: Snapshotting becomes a **manual step**. jj only captures file changes when you explicitly run a `jj` command (like `jj status`). Changes made by Claude in agent workspaces remain invisible until you manually trigger a snapshot. With multiple agents working in parallel, this makes it impossible to monitor their progress in real-time.
+
+**With Watchman**: Snapshotting is **automatic**. jj captures every file change instantly. You can monitor all agent workspaces from your main workspace via `jj log` and see their work as it happens.
+
+1. [Install Watchman](https://facebook.github.io/watchman/docs/install)
+2. Enable in jj config (`~/.config/jj/config.toml`):
+   ```toml
+   [fsmonitor]
+   backend = "watchman"
+   watchman.register-snapshot-trigger = true
+   ```
+3. Verify: `jj debug watchman status`
 
 ## Installation
 

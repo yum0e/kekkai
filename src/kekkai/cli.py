@@ -165,7 +165,13 @@ def run_agent(name: str) -> None:
         print(f"Error creating workspace: {e}", file=sys.stderr)
         sys.exit(1)
 
-    # 5. Create .git directory (scopes Claude to workspace)
+    # 5. Register watchman trigger by running jj in the new workspace
+    try:
+        client.status(cwd=workspace_path)
+    except Exception:
+        pass  # Non-fatal if this fails
+
+    # 6. Create .git directory (scopes Claude to workspace)
     git_dir = Path(workspace_path) / ".git"
     try:
         git_dir.mkdir(parents=True, exist_ok=True)
@@ -174,7 +180,7 @@ def run_agent(name: str) -> None:
         cleanup(client, jj_workspace_name, workspace_path, root)
         sys.exit(1)
 
-    # 6. Create agent marker file
+    # 7. Create agent marker file
     try:
         create_agent_marker(workspace_path, root, name)
     except OSError as e:
@@ -182,7 +188,7 @@ def run_agent(name: str) -> None:
         cleanup(client, jj_workspace_name, workspace_path, root)
         sys.exit(1)
 
-    # 7. Create git shim
+    # 8. Create git shim
     try:
         shim_path.mkdir(parents=True, exist_ok=True)
         shim_script = shim_path / "git"
@@ -193,27 +199,27 @@ def run_agent(name: str) -> None:
         cleanup(client, jj_workspace_name, workspace_path, root)
         sys.exit(1)
 
-    # 8. Build env with shim in PATH
+    # 9. Build env with shim in PATH
     env = os.environ.copy()
     env["PATH"] = f"{shim_path}:{env.get('PATH', '')}"
 
-    # 9. Run claude with terminal passthrough
+    # 10. Run claude with terminal passthrough
     result = subprocess.run(["claude"], cwd=workspace_path, env=env)
 
     if result.returncode != 0:
         print(f"\nClaude exited with code {result.returncode}", file=sys.stderr)
 
-    # 10. Check for uncommitted changes
+    # 11. Check for uncommitted changes
     if has_uncommitted_changes(client, workspace_path):
         print("\nWarning: This workspace has uncommitted changes!")
 
-    # 11. Prompt for cleanup
+    # 12. Prompt for cleanup
     try:
         answer = input("\nKeep workspace for inspection? [y/N] ").strip().lower()
     except (EOFError, KeyboardInterrupt):
         answer = ""
 
-    # 12. Cleanup or keep
+    # 13. Cleanup or keep
     if answer not in ("y", "yes"):
         cleanup(client, jj_workspace_name, workspace_path, root)
         print(f"Workspace '{name}' removed")
