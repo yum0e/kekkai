@@ -96,3 +96,7 @@ class JJClient:
     def status(self, cwd: str | None = None) -> str:
         """Return jj status output."""
         return self._run("status", cwd=cwd)
+
+    def new(self, revision: str, cwd: str | None = None) -> str:
+        """Create a new revision based on the given revision."""
+        return self._run("new", "-r", revision, cwd=cwd)

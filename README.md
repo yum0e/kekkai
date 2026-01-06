@@ -30,6 +30,9 @@ kekkai feature-auth --agent=claude
 
 # List existing agent workspaces
 kekkai list
+
+# Create a new revision from an agent workspace (run from root workspace)
+kekkai look feature-auth
 ```
 
 Use `--agent=codex|claude` to select the agent.
@@ -63,7 +66,14 @@ jj log
 
 ## Managing Agent Changes
 
-From your main workspace, use jj to integrate agent work:
+From your main workspace, you can create a new revision directly from an agent's
+working copy:
+
+```bash
+kekkai look feature-auth
+```
+
+Then use jj to integrate agent work:
 
 ```bash
 # See all changes across workspaces

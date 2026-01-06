@@ -25,6 +25,12 @@ class WorkspaceNotFoundError(KekkaiError):
     pass
 
 
+class NotRootWorkspaceError(KekkaiError):
+    """Command requires the root workspace."""
+
+    pass
+
+
 class JJCommandError(KekkaiError):
     """jj command failed."""
 

@@ -1,6 +1,7 @@
 """Main CLI entry point for kekkai."""
 
 import argparse
+import difflib
 import json
 import os
 import shutil
@@ -13,7 +14,7 @@ from pathlib import Path
 from rich.console import Console
 
 from . import __version__
-from .errors import NotJJRepoError, WorkspaceExistsError
+from .errors import NotJJRepoError, NotRootWorkspaceError, WorkspaceExistsError
 from .jj import JJClient
 
 SHIM_DIR = ".jj/.kekkai-bin"
@@ -69,6 +70,27 @@ def find_root_workspace(client: JJClient) -> str:
             pass
 
     return current_root
+
+
+def ensure_root_workspace(root: str) -> None:
+    """Ensure the command is run from the root workspace."""
+    marker_path = Path(root) / AGENT_MARKER_FILE
+    if marker_path.exists():
+        raise NotRootWorkspaceError("look must be run from the root workspace")
+
+
+def suggest_agent_names(query: str, candidates: list[str]) -> list[str]:
+    """Return a short list of suggested agent names."""
+    if not candidates:
+        return []
+    lookup = {name.lower(): name for name in candidates}
+    matches = difflib.get_close_matches(
+        query.lower(), lookup.keys(), n=3, cutoff=0.5
+    )
+    suggestions = [lookup[name] for name in matches]
+    if suggestions:
+        return suggestions
+    return [name for name in candidates if query.lower() in name.lower()]
 
 
 def compute_agent_path(root_path: str, agent_name: str) -> str:
@@ -300,6 +322,59 @@ def list_workspaces() -> None:
         print("No workspaces")
 
 
+def look_workspace(agent_name: str) -> None:
+    """Create a new revision based on an agent workspace."""
+    client = JJClient()
+
+    try:
+        root = client.workspace_root()
+    except NotJJRepoError:
+        print("Error: not in a jj repository", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        ensure_root_workspace(root)
+    except NotRootWorkspaceError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        workspaces = client.workspace_list(cwd=root)
+    except Exception as e:
+        print(f"Error listing workspaces: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    repo_name = Path(root).name
+    prefix = f"{repo_name}-"
+    agents: dict[str, str] = {}
+
+    for ws in workspaces:
+        if ws.name == "default":
+            continue
+        if not ws.name.startswith(prefix):
+            continue
+        agent = ws.name[len(prefix) :]
+        agent_path = Path(root).parent / ws.name
+        marker_path = agent_path / AGENT_MARKER_FILE
+        if marker_path.exists():
+            agents[agent] = ws.name
+
+    if agent_name not in agents:
+        print(f"Error: agent workspace '{agent_name}' not found", file=sys.stderr)
+        suggestions = suggest_agent_names(agent_name, sorted(agents.keys()))
+        if suggestions:
+            print(f"Did you mean: {', '.join(suggestions)}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        client.new(revision=f"\"{agents[agent_name]}\"@", cwd=root)
+    except Exception as e:
+        print(f"Error creating new revision: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Created new revision from '{agent_name}'")
+
+
 def main() -> None:
     """Main entry point."""
     parser = argparse.ArgumentParser(
@@ -315,7 +390,12 @@ def main() -> None:
     parser.add_argument(
         "name",
         nargs="?",
-        help="Workspace name (or 'list' to list workspaces)",
+        help="Workspace name (or 'list'/'look' commands)",
+    )
+    parser.add_argument(
+        "agent_name",
+        nargs="?",
+        help="Agent workspace name for 'look'",
     )
     parser.add_argument(
         "--agent",
@@ -331,6 +411,11 @@ def main() -> None:
         sys.exit(1)
     elif args.name == "list":
         list_workspaces()
+    elif args.name == "look":
+        if not args.agent_name:
+            print("Error: look requires an agent name", file=sys.stderr)
+            sys.exit(1)
+        look_workspace(args.agent_name)
     else:
         run_agent(args.name, AGENTS[args.agent])
 

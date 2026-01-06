@@ -20,6 +20,7 @@ from kekkai.cli import (
     compute_jj_workspace_name,
     create_agent_marker,
     find_root_workspace,
+    look_workspace,
     main,
     run_agent,
 )
@@ -380,3 +381,75 @@ def test_version_flag_outputs_version(capsys, monkeypatch):
     assert excinfo.value.code == 0
     output = capsys.readouterr().out
     assert f"kekkai {__version__}" in output
+
+
+def test_look_workspace_creates_new_revision(temp_jj_repo, monkeypatch):
+    """look should create a new revision based on the agent workspace."""
+    client = JJClient()
+    agent_name = "look-agent"
+    agent_path = compute_agent_path(str(temp_jj_repo), agent_name)
+
+    client.workspace_add(agent_path, cwd=str(temp_jj_repo))
+    create_agent_marker(agent_path, str(temp_jj_repo), agent_name, "codex")
+
+    def current_change_id() -> str:
+        result = subprocess.run(
+            [
+                "jj",
+                "log",
+                "-r",
+                "@",
+                "--no-graph",
+                "--template",
+                "change_id",
+            ],
+            cwd=temp_jj_repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return result.stdout.strip()
+
+    before = current_change_id()
+    monkeypatch.chdir(temp_jj_repo)
+    look_workspace(agent_name)
+    after = current_change_id()
+
+    assert before != after
+
+
+def test_look_workspace_requires_root(temp_jj_repo, monkeypatch, capsys):
+    """look should fail when run from an agent workspace."""
+    client = JJClient()
+    agent_name = "agent-root-check"
+    agent_path = compute_agent_path(str(temp_jj_repo), agent_name)
+
+    client.workspace_add(agent_path, cwd=str(temp_jj_repo))
+    create_agent_marker(agent_path, str(temp_jj_repo), agent_name, "codex")
+
+    monkeypatch.chdir(agent_path)
+    with pytest.raises(SystemExit) as excinfo:
+        look_workspace(agent_name)
+
+    assert excinfo.value.code == 1
+    err = capsys.readouterr().err.lower()
+    assert "root workspace" in err
+
+
+def test_look_workspace_suggests_similar_names(temp_jj_repo, monkeypatch, capsys):
+    """look should suggest similar agent names when not found."""
+    client = JJClient()
+    agent_name = "feature-preview"
+    agent_path = compute_agent_path(str(temp_jj_repo), agent_name)
+
+    client.workspace_add(agent_path, cwd=str(temp_jj_repo))
+    create_agent_marker(agent_path, str(temp_jj_repo), agent_name, "codex")
+
+    monkeypatch.chdir(temp_jj_repo)
+    with pytest.raises(SystemExit) as excinfo:
+        look_workspace("feature-prevew")
+
+    assert excinfo.value.code == 1
+    err = capsys.readouterr().err.lower()
+    assert "did you mean" in err
+    assert agent_name in err

@@ -1,6 +1,7 @@
 """Tests for kekkai.jj module."""
 
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -77,6 +78,35 @@ def test_workspace_forget(temp_jj_repo):
 
     # Note: workspace_forget does NOT delete the directory
     assert workspace_path.exists()
+
+
+def test_new_revision(temp_jj_repo):
+    """Test creating a new revision."""
+    client = JJClient()
+
+    def current_change_id() -> str:
+        result = subprocess.run(
+            [
+                "jj",
+                "log",
+                "-r",
+                "@",
+                "--no-graph",
+                "--template",
+                "change_id",
+            ],
+            cwd=temp_jj_repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return result.stdout.strip()
+
+    before = current_change_id()
+    client.new("@", cwd=str(temp_jj_repo))
+    after = current_change_id()
+
+    assert before != after
 
 
 def test_not_jj_repo(temp_non_jj_dir):
