@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "kekkai"
-version = "0.1.1"
+version = "0.1.2"
 description = "Minimal CLI wrapper that launches Claude Code in isolated jj workspaces"
 readme = "README.md"
 requires-python = ">=3.10"
